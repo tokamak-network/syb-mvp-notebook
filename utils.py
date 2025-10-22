@@ -85,7 +85,8 @@ def format_transaction_display(txn, users: Dict, index: int = None) -> str:
 class TransactionSimulator:
     """Manages background simulation of random transactions."""
 
-    def __init__(self, contract, users: Dict, connected_user_addr: str, interval: int = 10):
+    def __init__(self, contract, users: Dict, connected_user_addr: str, interval: int = 3,
+                 on_new_user_callback=None):
         """
         Initialize transaction simulator.
 
@@ -94,6 +95,7 @@ class TransactionSimulator:
             users: Dictionary of user information
             connected_user_addr: Address of the connected user (to exclude from simulation)
             interval: Seconds between simulated transactions
+            on_new_user_callback: Optional callback function when new user is created
         """
         self.contract = contract
         self.users = users
@@ -101,6 +103,8 @@ class TransactionSimulator:
         self.interval = interval
         self.running = False
         self.thread = None
+        self.on_new_user_callback = on_new_user_callback
+        self.next_user_id = len(users)  # Track next user ID for naming
 
         # Get list of other users (exclude connected user)
         self.other_users = [
@@ -121,6 +125,11 @@ class TransactionSimulator:
     def _generate_random_transaction(self):
         """Generate a random transaction from a random user."""
         if not self.other_users:
+            return
+
+        # Occasionally create a new user (5% chance)
+        if random.random() < 0.05:
+            self._create_new_user()
             return
 
         # Select random user
@@ -168,6 +177,44 @@ class TransactionSimulator:
 
         except Exception as e:
             # Silently ignore transaction errors (e.g., insufficient balance)
+            pass
+
+    def _create_new_user(self):
+        """Create a new user via CreateAccountDeposit transaction."""
+        try:
+            from contract_interface import SYBUser
+
+            # Generate new address and user info
+            new_addr = generate_random_eth_address()
+            user_name = f"User {self.next_user_id}"
+
+            # Create initial deposit (this will trigger TXN_DEPOSIT_NEW_ACCOUNT)
+            # Random amount between 0.5 and 3.0 ETH
+            initial_deposit = random.uniform(0.5, 3.0)
+            self.contract.deposit(new_addr, int(initial_deposit * 10**18))
+
+            # Create user interface
+            user_interface = SYBUser(self.contract, new_addr)
+
+            # Add to users dictionary
+            self.users[new_addr] = {
+                'interface': user_interface,
+                'name': user_name,
+                'address': new_addr
+            }
+
+            # Add to other_users list for future transactions
+            self.other_users.append((new_addr, self.users[new_addr]))
+
+            # Increment user counter
+            self.next_user_id += 1
+
+            # Trigger callback if provided (for graph update)
+            if self.on_new_user_callback:
+                self.on_new_user_callback(new_addr, user_name)
+
+        except Exception as e:
+            # Silently ignore errors in new user creation
             pass
 
     def start(self):
