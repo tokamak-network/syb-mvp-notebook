@@ -2,7 +2,6 @@
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output
-import time
 import threading
 from contract_interface import SYBContract, SYBUser
 from network import Network
@@ -11,10 +10,6 @@ from utils import (
     TransactionSimulator,
     format_transaction_display
 )
-try:
-    from ipykernel.kernelbase import Kernel
-except ImportError:
-    Kernel = None
 
 def create_random_network(num_users=8, random_name='erdos_renyi', balance_range=(0.0, 0.1)) -> tuple:
     """Create a random network, initialize contract, and set up user interfaces."""
@@ -71,21 +66,13 @@ class SYBUserInterface:
         self.current_batch_transactions = []
         self.last_batch_scores = None  # Store scores from last batch
 
-        # Get reference to kernel for scheduling updates
-        try:
-            from IPython import get_ipython
-            self.ipython = get_ipython()
-            self.kernel = self.ipython.kernel if self.ipython else None
-        except:
-            self.ipython = None
-            self.kernel = None
+        # Timer for periodic updates (single-threaded)
+        self.update_timer = None
+        self.monitor_running = False
 
         self._create_widgets()
         self._create_interface()
         self._connect_events()
-
-        # Start background monitoring
-        self._start_queue_monitor()
 
     def _create_widgets(self):
         """Create UI widgets."""
@@ -271,74 +258,35 @@ class SYBUserInterface:
             with self.output_area:
                 print(f"❌ Error getting balance: {e}")
 
-    def _safe_widget_update(self, widget, value):
-        """Safely update a widget value, handling thread context issues."""
-        if threading.current_thread() is threading.main_thread():
-            # We're in the main thread, update directly
-            try:
-                widget.value = value
-                return
-            except:
-                pass
+    def _update_ui_periodic(self):
+        """Periodic update called from main thread timer."""
+        try:
+            # Update all displays
+            self._update_queue_display()
+            self._update_current_status()
+            self._update_last_batch_status()
 
-        # We're in a background thread, schedule on kernel's event loop
-        if self.kernel and hasattr(self.kernel, 'io_loop'):
-            # Use tornado's IOLoop to schedule the update on the main thread
-            def update_widget():
-                try:
-                    widget.value = value
-                except Exception:
-                    pass
-
-            try:
-                self.kernel.io_loop.add_callback(update_widget)
-            except Exception:
-                # Fallback: just try to update directly and ignore errors
-                try:
-                    widget.value = value
-                except:
-                    pass
-        else:
-            # No kernel available, try direct update
-            try:
-                widget.value = value
-            except:
-                pass
-
-    def _safe_output_print(self, output_widget, message):
-        """Safely print to an Output widget from any thread."""
-        def do_print():
-            try:
-                with output_widget:
-                    print(message)
-            except Exception:
-                pass
-
-        if threading.current_thread() is threading.main_thread():
-            do_print()
-        elif self.kernel and hasattr(self.kernel, 'io_loop'):
-            try:
-                self.kernel.io_loop.add_callback(do_print)
-            except:
-                pass
+            # Check if we need to auto-forge a batch
+            if not self.batch_processing and len(self.contract.unprocessed_txns) >= self.contract.batch_size:
+                self._forge_batch_sync()
+        except Exception:
+            pass
 
     def _update_queue_display(self):
         """Update the transaction queue display."""
         try:
             txns = self.contract.unprocessed_txns
             if not txns:
-                new_value = "<div style='padding: 10px; color: #666;'>Queue empty</div>"
+                self.queue_display.value = "<div style='padding: 10px; color: #666;'>Queue empty</div>"
             else:
                 lines = []
                 for i, txn in enumerate(txns, 1):
                     txn_str = format_transaction_display(txn, self.users, index=i)
                     lines.append(f"<div style='padding: 3px; font-family: monospace; font-size: 12px;'>{txn_str}</div>")
                 content = "".join(lines)
-                new_value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{content}</div>"
-
-            self._safe_widget_update(self.queue_display, new_value)
+                self.queue_display.value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{content}</div>"
         except Exception as e:
-            self._safe_widget_update(self.queue_display, f"<div style='padding: 10px; color: red;'>Error: {e}</div>")
+            self.queue_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
 
     def _update_batch_display(self, processing=False):
         """Update the batch forging display."""
@@ -350,13 +298,11 @@ class SYBUserInterface:
                     lines.append(f"<div style='padding: 3px; font-family: monospace; font-size: 12px;'>{txn_str}</div>")
                 content = "".join(lines)
                 spinner = "<div style='text-align: center; padding: 10px;'>⚡ Processing batch...</div>"
-                new_value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{spinner}{content}</div>"
+                self.batch_display.value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{spinner}{content}</div>"
             else:
-                new_value = "<div style='padding: 10px; color: #666;'>No batch processing</div>"
-
-            self._safe_widget_update(self.batch_display, new_value)
+                self.batch_display.value = "<div style='padding: 10px; color: #666;'>No batch processing</div>"
         except Exception as e:
-            self._safe_widget_update(self.batch_display, f"<div style='padding: 10px; color: red;'>Error: {e}</div>")
+            self.batch_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
 
     def _update_current_status(self):
         """Update the current status display."""
@@ -382,22 +328,22 @@ class SYBUserInterface:
                 <div style='padding: 3px;'><strong>📊 Algorithm:</strong> {self.contract.scoring_algorithm}</div>
             </div>
             """
-            self._safe_widget_update(self.current_status_display, status_html)
+            self.current_status_display.value = status_html
         except Exception as e:
-            self._safe_widget_update(self.current_status_display, f"<div style='padding: 10px; color: red;'>Error: {e}</div>")
+            self.current_status_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
 
     def _update_last_batch_status(self):
         """Update the last batch status display."""
         try:
             last_batch = self.contract.last_forged_batch
             if last_batch is None or last_batch == 0:
-                new_value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
+                self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
             else:
                 # Get batch info
                 batch_info = self.contract.batches.get(last_batch)
                 if batch_info:
                     num_txns = len(batch_info.transactions_processed)
-                    new_value = f"""
+                    self.last_batch_display.value = f"""
                     <div style='padding: 10px; font-size: 13px;'>
                         <div style='padding: 3px;'><strong>📦 Batch #:</strong> {last_batch}</div>
                         <div style='padding: 3px;'><strong>✅ Transactions:</strong> {num_txns}</div>
@@ -405,50 +351,47 @@ class SYBUserInterface:
                     </div>
                     """
                 else:
-                    new_value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
-
-            self._safe_widget_update(self.last_batch_display, new_value)
+                    self.last_batch_display.value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
         except Exception:
             # Don't show error, just show basic info
             last_batch = self.contract.last_forged_batch
             if last_batch and last_batch > 0:
-                new_value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
+                self.last_batch_display.value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
             else:
-                new_value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
-            self._safe_widget_update(self.last_batch_display, new_value)
+                self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
 
-    def _start_queue_monitor(self):
-        """Start background thread to monitor queue and trigger auto-batch."""
-        self.monitor_running = True
-        self.monitor_thread = threading.Thread(target=self._queue_monitor_loop, daemon=True)
-        self.monitor_thread.start()
+    def _start_periodic_updates(self):
+        """Start periodic UI updates using ipywidgets timer."""
+        if not self.monitor_running:
+            self.monitor_running = True
+            self._schedule_next_update()
 
-    def _queue_monitor_loop(self):
-        """Background loop to monitor queue and update displays."""
-        while self.monitor_running:
-            try:
-                # Update displays
-                self._update_queue_display()
-                self._update_current_status()
+    def _schedule_next_update(self):
+        """Schedule the next UI update."""
+        if self.monitor_running:
+            # Create a timer that calls update after 1 second
+            import threading
+            self.update_timer = threading.Timer(1.0, self._on_timer_tick)
+            self.update_timer.daemon = True
+            self.update_timer.start()
 
-                # Check if we need to auto-forge a batch
-                if not self.batch_processing and len(self.contract.unprocessed_txns) >= self.contract.batch_size:
-                    self._trigger_auto_batch_forge()
-
-            except Exception as e:
-                pass  # Silently ignore errors in background thread
-
-            time.sleep(1)  # Check every second
-
-    def _trigger_auto_batch_forge(self):
-        """Trigger automatic batch forging in background thread."""
-        self.batch_processing = True
-        forge_thread = threading.Thread(target=self._forge_batch_async, daemon=True)
-        forge_thread.start()
-
-    def _forge_batch_async(self):
-        """Forge batch asynchronously with UI updates."""
+    def _on_timer_tick(self):
+        """Called by timer - schedules UI update on main thread."""
         try:
+            # Call the periodic update
+            self._update_ui_periodic()
+        finally:
+            # Schedule next update
+            self._schedule_next_update()
+
+    def _forge_batch_sync(self):
+        """Forge batch synchronously (called from main thread timer)."""
+        if self.batch_processing:
+            return
+
+        try:
+            self.batch_processing = True
+
             # Copy current transactions to batch
             self.current_batch_transactions = list(self.contract.unprocessed_txns)
 
@@ -461,9 +404,6 @@ class SYBUserInterface:
             # Process the batch
             result = self.contract.forge_batch()
 
-            # Wait 2-3 seconds for UX
-            time.sleep(2.5)
-
             # Update graphs (now shows before vs after comparison)
             if result:
                 self._update_network_graph()
@@ -473,40 +413,29 @@ class SYBUserInterface:
             self.current_batch_transactions = []
             self._update_batch_display(processing=False)
 
-        except Exception:
-            # Cannot use output_area from background thread
-            # Errors will be silently handled
-            pass
+        except Exception as e:
+            self.batch_display.value = f"<div style='padding: 10px; color: red;'>Batch error: {e}</div>"
         finally:
             self.batch_processing = False
 
     def _update_network_graph(self):
         """Update both network graph displays (last batch vs current)."""
-        def do_update():
-            try:
-                # Update current network graph
-                with self.current_graph_output:
-                    clear_output(wait=True)
-                    current_scores = self.contract.network.compute_score('pagerank')
-                    self.contract.network.display_graph(scores=current_scores, title="Current State")
+        try:
+            # Update current network graph
+            with self.current_graph_output:
+                clear_output(wait=True)
+                current_scores = self.contract.network.compute_score('pagerank')
+                self.contract.network.display_graph(scores=current_scores, title="Current State")
 
-                # Update last batch network graph
-                with self.last_batch_graph_output:
-                    clear_output(wait=True)
-                    if self.last_batch_scores is not None:
-                        self.contract.network.display_graph(scores=self.last_batch_scores, title="Last Batch State")
-                    else:
-                        print("No previous batch data available")
-            except Exception:
-                pass
-
-        if threading.current_thread() is threading.main_thread():
-            do_update()
-        elif self.kernel and hasattr(self.kernel, 'io_loop'):
-            try:
-                self.kernel.io_loop.add_callback(do_update)
-            except:
-                pass
+            # Update last batch network graph
+            with self.last_batch_graph_output:
+                clear_output(wait=True)
+                if self.last_batch_scores is not None:
+                    self.contract.network.display_graph(scores=self.last_batch_scores, title="Last Batch State")
+                else:
+                    print("No previous batch data available")
+        except Exception:
+            pass
 
     def display_network_status(self):
         """Display network status summary."""
@@ -548,23 +477,23 @@ class SYBUserInterface:
             print(f"❌ Error getting network status: {e}")
 
     def stop(self):
-        """Stop all background threads and cleanup."""
-        # Stop queue monitor
+        """Stop all periodic updates and cleanup."""
+        # Stop periodic updates
         self.monitor_running = False
-        if hasattr(self, 'monitor_thread') and self.monitor_thread:
-            self.monitor_thread.join(timeout=2.0)
+        if self.update_timer:
+            self.update_timer.cancel()
+            self.update_timer = None
 
         # Stop simulator
         if self.simulator:
             self.simulator.stop()
 
-        print("✅ Background threads stopped")
-    
+        print("✅ Updates stopped")
+
     def resume(self):
         """Resume the transaction simulator and monitoring."""
         print("🎬 Resuming transaction simulator (3s interval)...")
-        self.monitor_running = True
-        self._start_queue_monitor()
+        self._start_periodic_updates()
 
         self.simulator = TransactionSimulator(
             self.contract,
@@ -600,6 +529,9 @@ class SYBUserInterface:
 
         # Display the interface
         display(self.contract_interface)
+
+        # Start periodic UI updates
+        self._start_periodic_updates()
 
         # Start transaction simulator
         print("🎬 Starting transaction simulator (3s interval)...")
