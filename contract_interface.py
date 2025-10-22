@@ -59,6 +59,7 @@ class SYBContract:
         self.vouches: Dict[str, Dict[str, bool]] = {}
         self.score_snapshots: Dict[str, ScoreSnapshot] = {}
         self.unprocessed_txns: List[Transaction] = []
+        self.batches: Dict[int, BatchResult] = {}  # Store batch history
         self.network = Network()
         self.scoring_algorithm = scoring_algorithm
         self.address_to_idx: Dict[str, int] = {}
@@ -181,7 +182,11 @@ class SYBContract:
                 scaled_score = int(new_scores[node_index] * 2**32)
                 self.score_snapshots[user_address] = ScoreSnapshot(scaled_score, self.last_forged_batch)
 
-        return BatchResult(self.last_forged_batch, batch_transactions, new_scores)
+        # Create and store batch result
+        batch_result = BatchResult(self.last_forged_batch, batch_transactions, new_scores)
+        self.batches[self.last_forged_batch] = batch_result
+
+        return batch_result
 
     def get_account_info(self, address: str) -> Optional[AccountInfo]:
         """Get account information for an address."""
