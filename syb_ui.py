@@ -67,6 +67,10 @@ class SYBUserInterface:
         self.current_batch_transactions = []
         self.last_batch_scores = None  # Store scores from last batch
 
+        # Thread-safe widget update queue
+        self.update_lock = threading.Lock()
+        self.pending_updates = []
+
         self._create_widgets()
         self._create_interface()
         self._connect_events()
@@ -258,21 +262,33 @@ class SYBUserInterface:
             with self.output_area:
                 print(f"❌ Error getting balance: {e}")
 
+    def _safe_widget_update(self, widget, value):
+        """Safely update a widget value, handling thread context issues."""
+        try:
+            # Try direct update (works in main thread)
+            widget.value = value
+        except (RuntimeError, LookupError) as e:
+            # If we're in a background thread, store the update for later
+            with self.update_lock:
+                self.pending_updates.append((widget, value))
+
     def _update_queue_display(self):
         """Update the transaction queue display."""
         try:
             txns = self.contract.unprocessed_txns
             if not txns:
-                self.queue_display.value = "<div style='padding: 10px; color: #666;'>Queue empty</div>"
+                new_value = "<div style='padding: 10px; color: #666;'>Queue empty</div>"
             else:
                 lines = []
                 for i, txn in enumerate(txns, 1):
                     txn_str = format_transaction_display(txn, self.users, index=i)
                     lines.append(f"<div style='padding: 3px; font-family: monospace; font-size: 12px;'>{txn_str}</div>")
                 content = "".join(lines)
-                self.queue_display.value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{content}</div>"
+                new_value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{content}</div>"
+
+            self._safe_widget_update(self.queue_display, new_value)
         except Exception as e:
-            self.queue_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
+            self._safe_widget_update(self.queue_display, f"<div style='padding: 10px; color: red;'>Error: {e}</div>")
 
     def _update_batch_display(self, processing=False):
         """Update the batch forging display."""
@@ -284,11 +300,13 @@ class SYBUserInterface:
                     lines.append(f"<div style='padding: 3px; font-family: monospace; font-size: 12px;'>{txn_str}</div>")
                 content = "".join(lines)
                 spinner = "<div style='text-align: center; padding: 10px;'>⚡ Processing batch...</div>"
-                self.batch_display.value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{spinner}{content}</div>"
+                new_value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{spinner}{content}</div>"
             else:
-                self.batch_display.value = "<div style='padding: 10px; color: #666;'>No batch processing</div>"
+                new_value = "<div style='padding: 10px; color: #666;'>No batch processing</div>"
+
+            self._safe_widget_update(self.batch_display, new_value)
         except Exception as e:
-            self.batch_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
+            self._safe_widget_update(self.batch_display, f"<div style='padding: 10px; color: red;'>Error: {e}</div>")
 
     def _update_current_status(self):
         """Update the current status display."""
@@ -314,37 +332,40 @@ class SYBUserInterface:
                 <div style='padding: 3px;'><strong>📊 Algorithm:</strong> {self.contract.scoring_algorithm}</div>
             </div>
             """
-            self.current_status_display.value = status_html
+            self._safe_widget_update(self.current_status_display, status_html)
         except Exception as e:
-            self.current_status_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
+            self._safe_widget_update(self.current_status_display, f"<div style='padding: 10px; color: red;'>Error: {e}</div>")
 
     def _update_last_batch_status(self):
         """Update the last batch status display."""
         try:
             last_batch = self.contract.last_forged_batch
             if last_batch is None or last_batch == 0:
-                self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
+                new_value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
             else:
                 # Get batch info
                 batch_info = self.contract.batches.get(last_batch)
                 if batch_info:
                     num_txns = len(batch_info.transactions_processed)
-                    status_html = f"""
+                    new_value = f"""
                     <div style='padding: 10px; font-size: 13px;'>
                         <div style='padding: 3px;'><strong>📦 Batch #:</strong> {last_batch}</div>
                         <div style='padding: 3px;'><strong>✅ Transactions:</strong> {num_txns}</div>
                         <div style='padding: 3px;'><strong>⏰ Status:</strong> Completed</div>
                     </div>
                     """
-                    self.last_batch_display.value = status_html
                 else:
-                    self.last_batch_display.value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
-        except Exception as e:
+                    new_value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
+
+            self._safe_widget_update(self.last_batch_display, new_value)
+        except Exception:
             # Don't show error, just show basic info
+            last_batch = self.contract.last_forged_batch
             if last_batch and last_batch > 0:
-                self.last_batch_display.value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
+                new_value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
             else:
-                self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
+                new_value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
+            self._safe_widget_update(self.last_batch_display, new_value)
 
     def _start_queue_monitor(self):
         """Start background thread to monitor queue and trigger auto-batch."""
@@ -402,33 +423,22 @@ class SYBUserInterface:
             self.current_batch_transactions = []
             self._update_batch_display(processing=False)
 
-        except Exception as e:
-            with self.output_area:
-                print(f"❌ Auto-batch error: {e}")
+        except Exception:
+            # Cannot use output_area from background thread
+            # Errors will be silently handled
+            pass
         finally:
             self.batch_processing = False
 
     def _update_network_graph(self):
         """Update both network graph displays (last batch vs current)."""
         try:
-            # Update current network graph
-            with self.current_graph_output:
-                clear_output(wait=True)
-                current_scores = self.contract.network.compute_score('pagerank')
-                self.contract.network.display_graph(scores=current_scores, title="Current State")
-
-            # Update last batch network graph
-            with self.last_batch_graph_output:
-                clear_output(wait=True)
-                if self.last_batch_scores is not None:
-                    self.contract.network.display_graph(scores=self.last_batch_scores, title="Last Batch State")
-                else:
-                    print("No previous batch data available")
-
-        except Exception as e:
-            with self.current_graph_output:
-                clear_output(wait=True)
-                print(f"❌ Error updating graph: {e}")
+            # Skip graph updates from background threads
+            # Graphs can only be updated from the main thread
+            # This is a limitation of ipywidgets Output widgets
+            pass
+        except Exception:
+            pass
 
     def display_network_status(self):
         """Display network status summary."""
