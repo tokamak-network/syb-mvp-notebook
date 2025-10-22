@@ -258,29 +258,6 @@ class SYBUserInterface:
             with self.output_area:
                 print(f"❌ Error getting balance: {e}")
 
-    def _handle_network(self, b):
-        with self.output_area:
-            clear_output(wait=True)
-            print("🌐 Displaying Network Graph...")
-            try:
-                scores = self.contract.network.compute_score('pagerank')
-                self.contract.network.display_graph(scores=scores, title="Current Network State")
-            except Exception as e:
-                print(f"❌ Error displaying network: {e}")
-
-    def _handle_forge_batch(self, b):
-        with self.output_area:
-            clear_output(wait=True)
-            print("⚡ Forging batch...")
-            try:
-                result = self.contract.forge_batch()
-                if result:
-                    print(f"✅ Batch {result.batch_num} forged with {len(result.transactions_processed)} txns.")
-                    self._handle_network(None) # Refresh network view
-                else:
-                    print("⏳ Not enough transactions for a new batch.")
-            except Exception as e: print(f"❌ Error forging batch: {e}")
-
     def _update_queue_display(self):
         """Update the transaction queue display."""
         try:
@@ -505,9 +482,9 @@ class SYBUserInterface:
 
         print("✅ Background threads stopped")
     
-    def resume (self):
-        """Resume the transaction simulator."""
-        print("🎬 Starting transaction simulator (10s interval)...")
+    def resume(self):
+        """Resume the transaction simulator and monitoring."""
+        print("🎬 Resuming transaction simulator (3s interval)...")
         self.monitor_running = True
         self._start_queue_monitor()
 
@@ -515,10 +492,23 @@ class SYBUserInterface:
             self.contract,
             self.users,
             self.first_user_addr,
-            interval=10
+            interval=3,
+            on_new_user_callback=self._on_new_user_created
         )
         self.simulator.start()
         print("✅ Simulator resumed! Transactions will be generated automatically.")
+
+    def _on_new_user_created(self, new_addr: str, user_name: str):
+        """Callback when a new user is created via CreateAccountDeposit."""
+        try:
+            # Update vouch and unvouch dropdowns
+            self.vouch_target.options = self._get_other_users()
+
+            # Display notification in output area
+            with self.output_area:
+                print(f"👤 New user joined: {user_name} ({new_addr[:12]}...)")
+        except Exception as e:
+            pass  # Silently ignore errors
 
     def display(self):
         """Display main contract interface."""
@@ -534,12 +524,13 @@ class SYBUserInterface:
         display(self.contract_interface)
 
         # Start transaction simulator
-        print("🎬 Starting transaction simulator (10s interval)...")
+        print("🎬 Starting transaction simulator (3s interval)...")
         self.simulator = TransactionSimulator(
             self.contract,
             self.users,
             self.first_user_addr,
-            interval=10
+            interval=3,
+            on_new_user_callback=self._on_new_user_created
         )
         self.simulator.start()
         print("✅ Simulator started! Transactions will be generated automatically.")
