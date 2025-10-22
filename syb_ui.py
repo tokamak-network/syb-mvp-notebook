@@ -3,6 +3,7 @@
 import ipywidgets as widgets
 from IPython.display import display, clear_output
 import threading
+import asyncio
 from contract_interface import SYBContract, SYBUser
 from network import Network
 from utils import (
@@ -302,9 +303,66 @@ class SYBUserInterface:
 
             # Check if we need to auto-forge a batch
             if not self.batch_processing and len(self.contract.unprocessed_txns) >= self.contract.batch_size:
-                self._forge_batch_sync()
+                # Schedule batch processing with a delay to allow UI to update
+                self._schedule_batch_processing()
         except Exception:
             pass
+
+    def _schedule_batch_processing(self):
+        """Schedule batch processing with a small delay to show animation."""
+        if self.batch_processing:
+            return
+
+        # Mark as processing and show animation immediately
+        self.batch_processing = True
+        self.current_batch_transactions = list(self.contract.unprocessed_txns)
+        self._update_batch_display(processing=True)
+
+        # Schedule actual batch processing after a tiny delay (allows UI to update)
+        timer = threading.Timer(0.1, self._forge_batch_delayed)
+        timer.daemon = True
+        timer.start()
+
+    def _forge_batch_delayed(self):
+        """Execute batch forging after delay (runs in background thread)."""
+        try:
+            # Save current scores as "last batch" before forging
+            self.last_batch_scores = self.contract.network.compute_score('pagerank')
+
+            # Process the batch
+            result = self.contract.forge_batch()
+
+            # Schedule UI updates on main thread
+            def update_ui_after_batch():
+                try:
+                    if result:
+                        self._update_network_graph()
+                        self._update_last_batch_status()
+
+                    # Clear batch display
+                    self.current_batch_transactions = []
+                    self._update_batch_display(processing=False)
+                    self._update_queue_display()
+                    self._update_current_status()
+                except Exception:
+                    pass
+                finally:
+                    self.batch_processing = False
+
+            # Try to schedule on event loop
+            try:
+                loop = asyncio.get_event_loop()
+                loop.call_soon_threadsafe(update_ui_after_batch)
+            except:
+                # Fallback: just update directly
+                update_ui_after_batch()
+
+        except Exception as e:
+            try:
+                self.batch_display.value = f"<div style='padding: 10px; color: red;'>Batch error: {e}</div>"
+            except:
+                pass
+            self.batch_processing = False
 
     def _update_queue_display(self):
         """Update the transaction queue display."""
@@ -394,39 +452,6 @@ class SYBUserInterface:
             else:
                 self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
 
-    def _forge_batch_sync(self):
-        """Forge batch synchronously (called from main thread timer)."""
-        if self.batch_processing:
-            return
-
-        try:
-            self.batch_processing = True
-
-            # Copy current transactions to batch
-            self.current_batch_transactions = list(self.contract.unprocessed_txns)
-
-            # Update batch display with loading animation
-            self._update_batch_display(processing=True)
-
-            # Save current scores as "last batch" before forging
-            self.last_batch_scores = self.contract.network.compute_score('pagerank')
-
-            # Process the batch
-            result = self.contract.forge_batch()
-
-            # Update graphs (now shows before vs after comparison)
-            if result:
-                self._update_network_graph()
-                self._update_last_batch_status()
-
-            # Clear batch display
-            self.current_batch_transactions = []
-            self._update_batch_display(processing=False)
-
-        except Exception as e:
-            self.batch_display.value = f"<div style='padding: 10px; color: red;'>Batch error: {e}</div>"
-        finally:
-            self.batch_processing = False
 
     def _update_network_graph(self):
         """Update both network graph displays (last batch vs current)."""
