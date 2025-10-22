@@ -2,9 +2,15 @@
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output
+import time
+import threading
 from contract_interface import SYBContract, SYBUser
 from network import Network
-from utils import generate_mul_eth_addresses
+from utils import (
+    generate_mul_eth_addresses,
+    TransactionSimulator,
+    format_transaction_display
+)
 
 def create_random_network(num_users=8, random_name='erdos_renyi', balance_range=(0.0, 0.1)) -> tuple:
     """Create a random network, initialize contract, and set up user interfaces."""
@@ -54,10 +60,19 @@ class SYBUserInterface:
         self.first_user_addr = list(users.keys())[0]
         self.first_user = users[self.first_user_addr]
         self.user_interface = self.first_user['interface']
-        
+
+        # Simulation state
+        self.simulator = None
+        self.batch_processing = False
+        self.current_batch_transactions = []
+        self.last_batch_scores = None  # Store scores from last batch
+
         self._create_widgets()
         self._create_interface()
         self._connect_events()
+
+        # Start background monitoring
+        self._start_queue_monitor()
 
     def _create_widgets(self):
         """Create UI widgets."""
@@ -65,20 +80,30 @@ class SYBUserInterface:
         self.withdraw_amount = widgets.FloatText(value=0.5, description='Amount (ETH):')
         self.vouch_target = widgets.Dropdown(options=self._get_other_users(), description='Target User:')
         self.unvouch_target = widgets.Dropdown(options=[], description='Target User:')
-        
+
         self.deposit_btn = widgets.Button(description='💰 Deposit', button_style='primary')
         self.withdraw_btn = widgets.Button(description='💸 Withdraw', button_style='warning')
         self.vouch_btn = widgets.Button(description='👍 Vouch', button_style='success')
         self.unvouch_btn = widgets.Button(description='👎 Unvouch', button_style='danger')
         self.balance_btn = widgets.Button(description='📊 Balance', button_style='info')
-        self.network_btn = widgets.Button(description='🌐 Network', button_style='info')
-        self.forge_batch_btn = widgets.Button(description='⚡ Forge Batch', button_style='success')
 
         self.deposit_submit = widgets.Button(description='Submit', button_style='success')
         self.withdraw_submit = widgets.Button(description='Submit', button_style='success')
         self.vouch_submit = widgets.Button(description='Submit', button_style='success')
         self.unvouch_submit = widgets.Button(description='Submit', button_style='success')
-        
+
+        # Queue and batch display widgets
+        self.queue_display = widgets.HTML(value="<div style='padding: 10px;'>Queue empty</div>")
+        self.batch_display = widgets.HTML(value="<div style='padding: 10px;'>No batch processing</div>")
+
+        # Status display widgets
+        self.last_batch_display = widgets.HTML(value="<div style='padding: 10px;'>No batches forged yet</div>")
+        self.current_status_display = widgets.HTML(value="<div style='padding: 10px;'>Loading...</div>")
+
+        # Network graph outputs - side by side
+        self.last_batch_graph_output = widgets.Output()
+        self.current_graph_output = widgets.Output()
+
         self.output_area = widgets.Output()
 
     def _get_other_users(self):
@@ -92,17 +117,64 @@ class SYBUserInterface:
         self.withdraw_section = widgets.VBox([self.withdraw_amount, self.withdraw_submit], layout=widgets.Layout(display='none'))
         self.vouch_section = widgets.VBox([self.vouch_target, self.vouch_submit], layout=widgets.Layout(display='none'))
         self.unvouch_section = widgets.VBox([self.unvouch_target, self.unvouch_submit], layout=widgets.Layout(display='none'))
-        
-        button_row1 = widgets.HBox([self.deposit_btn, self.withdraw_btn, self.vouch_btn, self.unvouch_btn])
-        button_row2 = widgets.HBox([self.balance_btn, self.network_btn, self.forge_batch_btn])
-        
-        self.contract_interface = widgets.VBox([
-            widgets.HTML(value="<h3>📋 SYB Contract Functions</h3>"),
-            button_row1, button_row2,
+
+        button_row = widgets.HBox([self.deposit_btn, self.withdraw_btn, self.vouch_btn, self.unvouch_btn, self.balance_btn])
+
+        # Top row: Queue and Batch displays
+        queue_box = widgets.VBox([
+            widgets.HTML(value="<h4 style='margin: 0; padding: 5px; background: #f0f0f0;'>📋 Transaction Queue</h4>"),
+            self.queue_display
+        ], layout=widgets.Layout(border='2px solid #4CAF50', padding='0px', width='48%'))
+
+        batch_box = widgets.VBox([
+            widgets.HTML(value="<h4 style='margin: 0; padding: 5px; background: #f0f0f0;'>⚡ Batch Forging</h4>"),
+            self.batch_display
+        ], layout=widgets.Layout(border='2px solid #FF9800', padding='0px', width='48%'))
+
+        top_row = widgets.HBox([queue_box, batch_box], layout=widgets.Layout(justify_content='space-between'))
+
+        # Middle row: Last Batch and Current Status
+        last_batch_box = widgets.VBox([
+            widgets.HTML(value="<h4 style='margin: 0; padding: 5px; background: #f0f0f0;'>📊 Last Batch Status</h4>"),
+            self.last_batch_display
+        ], layout=widgets.Layout(border='2px solid #2196F3', padding='0px', width='48%'))
+
+        current_status_box = widgets.VBox([
+            widgets.HTML(value="<h4 style='margin: 0; padding: 5px; background: #f0f0f0;'>📈 Current Status</h4>"),
+            self.current_status_display
+        ], layout=widgets.Layout(border='2px solid #9C27B0', padding='0px', width='48%'))
+
+        middle_row = widgets.HBox([last_batch_box, current_status_box], layout=widgets.Layout(justify_content='space-between'))
+
+        # User action interface
+        user_actions = widgets.VBox([
+            widgets.HTML(value="<h3>👤 User Actions</h3>"),
+            button_row,
             self.deposit_section, self.withdraw_section, self.vouch_section, self.unvouch_section,
-            widgets.HTML(value="<h4>📤 Transaction Results</h4>"),
             self.output_area
         ], layout=widgets.Layout(border='2px solid #2E86AB', padding='15px'))
+
+        # Graph row: Last Batch vs Current
+        last_graph_box = widgets.VBox([
+            widgets.HTML(value="<h4 style='margin: 0; padding: 5px; background: #f0f0f0; text-align: center;'>📊 Last Batch Network</h4>"),
+            self.last_batch_graph_output
+        ], layout=widgets.Layout(border='2px solid #2196F3', padding='0px', width='48%'))
+
+        current_graph_box = widgets.VBox([
+            widgets.HTML(value="<h4 style='margin: 0; padding: 5px; background: #f0f0f0; text-align: center;'>🌐 Current Network</h4>"),
+            self.current_graph_output
+        ], layout=widgets.Layout(border='2px solid #4CAF50', padding='0px', width='48%'))
+
+        graph_row = widgets.HBox([last_graph_box, current_graph_box], layout=widgets.Layout(justify_content='space-between'))
+
+        # Main layout
+        self.contract_interface = widgets.VBox([
+            top_row,
+            middle_row,
+            user_actions,
+            widgets.HTML(value="<h3 style='margin-top: 20px;'>🔄 Network Comparison</h3>"),
+            graph_row
+        ])
 
     def _connect_events(self):
         """Connect button events to handlers."""
@@ -110,15 +182,13 @@ class SYBUserInterface:
         self.withdraw_btn.on_click(self._show_withdraw_input)
         self.vouch_btn.on_click(self._show_vouch_input)
         self.unvouch_btn.on_click(self._show_unvouch_input)
-        
+
         self.deposit_submit.on_click(self._handle_deposit)
         self.withdraw_submit.on_click(self._handle_withdraw)
         self.vouch_submit.on_click(self._handle_vouch)
         self.unvouch_submit.on_click(self._handle_unvouch)
-        
+
         self.balance_btn.on_click(self._handle_balance)
-        self.network_btn.on_click(self._handle_network)
-        self.forge_batch_btn.on_click(self._handle_forge_batch)
 
     def toggle_inputs(self, show_section=None):
         """Show one input section and hide others."""
@@ -211,6 +281,178 @@ class SYBUserInterface:
                     print("⏳ Not enough transactions for a new batch.")
             except Exception as e: print(f"❌ Error forging batch: {e}")
 
+    def _update_queue_display(self):
+        """Update the transaction queue display."""
+        try:
+            txns = self.contract.unprocessed_txns
+            if not txns:
+                self.queue_display.value = "<div style='padding: 10px; color: #666;'>Queue empty</div>"
+            else:
+                lines = []
+                for i, txn in enumerate(txns, 1):
+                    txn_str = format_transaction_display(txn, self.users, index=i)
+                    lines.append(f"<div style='padding: 3px; font-family: monospace; font-size: 12px;'>{txn_str}</div>")
+                content = "".join(lines)
+                self.queue_display.value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{content}</div>"
+        except Exception as e:
+            self.queue_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
+
+    def _update_batch_display(self, processing=False):
+        """Update the batch forging display."""
+        try:
+            if processing and self.current_batch_transactions:
+                lines = []
+                for i, txn in enumerate(self.current_batch_transactions, 1):
+                    txn_str = format_transaction_display(txn, self.users, index=i)
+                    lines.append(f"<div style='padding: 3px; font-family: monospace; font-size: 12px;'>{txn_str}</div>")
+                content = "".join(lines)
+                spinner = "<div style='text-align: center; padding: 10px;'>⚡ Processing batch...</div>"
+                self.batch_display.value = f"<div style='padding: 5px; max-height: 200px; overflow-y: auto;'>{spinner}{content}</div>"
+            else:
+                self.batch_display.value = "<div style='padding: 10px; color: #666;'>No batch processing</div>"
+        except Exception as e:
+            self.batch_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
+
+    def _update_current_status(self):
+        """Update the current status display."""
+        try:
+            num_users = len(self.users)
+            pending_txns = len(self.contract.unprocessed_txns)
+            batch_size = self.contract.batch_size
+
+            # Calculate total deposits
+            total_deposits = 0
+            for user_data in self.users.values():
+                try:
+                    balance = user_data['interface'].get_my_balance() / 10**18
+                    total_deposits += balance
+                except:
+                    pass
+
+            status_html = f"""
+            <div style='padding: 10px; font-size: 13px;'>
+                <div style='padding: 3px;'><strong>👥 Total Users:</strong> {num_users}</div>
+                <div style='padding: 3px;'><strong>💰 Total Deposits:</strong> {total_deposits:.4f} ETH</div>
+                <div style='padding: 3px;'><strong>⏳ Pending Txns:</strong> {pending_txns} / {batch_size}</div>
+                <div style='padding: 3px;'><strong>📊 Algorithm:</strong> {self.contract.scoring_algorithm}</div>
+            </div>
+            """
+            self.current_status_display.value = status_html
+        except Exception as e:
+            self.current_status_display.value = f"<div style='padding: 10px; color: red;'>Error: {e}</div>"
+
+    def _update_last_batch_status(self):
+        """Update the last batch status display."""
+        try:
+            last_batch = self.contract.last_forged_batch
+            if last_batch is None or last_batch == 0:
+                self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
+            else:
+                # Get batch info
+                batch_info = self.contract.batches.get(last_batch)
+                if batch_info:
+                    num_txns = len(batch_info.transactions_processed)
+                    status_html = f"""
+                    <div style='padding: 10px; font-size: 13px;'>
+                        <div style='padding: 3px;'><strong>📦 Batch #:</strong> {last_batch}</div>
+                        <div style='padding: 3px;'><strong>✅ Transactions:</strong> {num_txns}</div>
+                        <div style='padding: 3px;'><strong>⏰ Status:</strong> Completed</div>
+                    </div>
+                    """
+                    self.last_batch_display.value = status_html
+                else:
+                    self.last_batch_display.value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
+        except Exception as e:
+            # Don't show error, just show basic info
+            if last_batch and last_batch > 0:
+                self.last_batch_display.value = f"<div style='padding: 10px;'>Batch #{last_batch} completed</div>"
+            else:
+                self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
+
+    def _start_queue_monitor(self):
+        """Start background thread to monitor queue and trigger auto-batch."""
+        self.monitor_running = True
+        self.monitor_thread = threading.Thread(target=self._queue_monitor_loop, daemon=True)
+        self.monitor_thread.start()
+
+    def _queue_monitor_loop(self):
+        """Background loop to monitor queue and update displays."""
+        while self.monitor_running:
+            try:
+                # Update displays
+                self._update_queue_display()
+                self._update_current_status()
+
+                # Check if we need to auto-forge a batch
+                if not self.batch_processing and len(self.contract.unprocessed_txns) >= self.contract.batch_size:
+                    self._trigger_auto_batch_forge()
+
+            except Exception as e:
+                pass  # Silently ignore errors in background thread
+
+            time.sleep(1)  # Check every second
+
+    def _trigger_auto_batch_forge(self):
+        """Trigger automatic batch forging in background thread."""
+        self.batch_processing = True
+        forge_thread = threading.Thread(target=self._forge_batch_async, daemon=True)
+        forge_thread.start()
+
+    def _forge_batch_async(self):
+        """Forge batch asynchronously with UI updates."""
+        try:
+            # Copy current transactions to batch
+            self.current_batch_transactions = list(self.contract.unprocessed_txns)
+
+            # Update batch display with loading animation
+            self._update_batch_display(processing=True)
+
+            # Save current scores as "last batch" before forging
+            self.last_batch_scores = self.contract.network.compute_score('pagerank')
+
+            # Process the batch
+            result = self.contract.forge_batch()
+
+            # Wait 2-3 seconds for UX
+            time.sleep(2.5)
+
+            # Update graphs (now shows before vs after comparison)
+            if result:
+                self._update_network_graph()
+                self._update_last_batch_status()
+
+            # Clear batch display
+            self.current_batch_transactions = []
+            self._update_batch_display(processing=False)
+
+        except Exception as e:
+            with self.output_area:
+                print(f"❌ Auto-batch error: {e}")
+        finally:
+            self.batch_processing = False
+
+    def _update_network_graph(self):
+        """Update both network graph displays (last batch vs current)."""
+        try:
+            # Update current network graph
+            with self.current_graph_output:
+                clear_output(wait=True)
+                current_scores = self.contract.network.compute_score('pagerank')
+                self.contract.network.display_graph(scores=current_scores, title="Current State")
+
+            # Update last batch network graph
+            with self.last_batch_graph_output:
+                clear_output(wait=True)
+                if self.last_batch_scores is not None:
+                    self.contract.network.display_graph(scores=self.last_batch_scores, title="Last Batch State")
+                else:
+                    print("No previous batch data available")
+
+        except Exception as e:
+            with self.current_graph_output:
+                clear_output(wait=True)
+                print(f"❌ Error updating graph: {e}")
+
     def display_network_status(self):
         """Display network status summary."""
         try:
@@ -250,7 +492,54 @@ class SYBUserInterface:
         except Exception as e:
             print(f"❌ Error getting network status: {e}")
 
+    def stop(self):
+        """Stop all background threads and cleanup."""
+        # Stop queue monitor
+        self.monitor_running = False
+        if hasattr(self, 'monitor_thread') and self.monitor_thread:
+            self.monitor_thread.join(timeout=2.0)
+
+        # Stop simulator
+        if self.simulator:
+            self.simulator.stop()
+
+        print("✅ Background threads stopped")
+    
+    def resume (self):
+        """Resume the transaction simulator."""
+        print("🎬 Starting transaction simulator (10s interval)...")
+        self.monitor_running = True
+        self._start_queue_monitor()
+
+        self.simulator = TransactionSimulator(
+            self.contract,
+            self.users,
+            self.first_user_addr,
+            interval=10
+        )
+        self.simulator.start()
+        print("✅ Simulator resumed! Transactions will be generated automatically.")
+
     def display(self):
         """Display main contract interface."""
         print(f"🔐 Connected as: {self.first_user['name']} ({self.first_user_addr[:12]}...)")
+
+        # Initialize displays
+        self._update_queue_display()
+        self._update_current_status()
+        self._update_last_batch_status()
+        self._update_network_graph()
+
+        # Display the interface
         display(self.contract_interface)
+
+        # Start transaction simulator
+        print("🎬 Starting transaction simulator (10s interval)...")
+        self.simulator = TransactionSimulator(
+            self.contract,
+            self.users,
+            self.first_user_addr,
+            interval=10
+        )
+        self.simulator.start()
+        print("✅ Simulator started! Transactions will be generated automatically.")
