@@ -13,49 +13,6 @@ def normalize_scores(scores):
         return scores / score_sum
     return np.zeros_like(scores)
 
-# def compute_pagerank_power_iterations(graph, alpha, source_node, max_iterations=100, tolerance=1e-6):
-#     """
-#     Computes a personalized PageRank vector for a given source node using
-#     the correct power iteration method.
-#     """
-#     n = graph.number_of_nodes()
-#     if n == 0:
-#         return np.array([])
-#     nodes = list(graph.nodes())
-#     node_to_idx = {node: i for i, node in enumerate(nodes)}
-
-#     # Initialize pagerank vector, with all mass on the source node.
-#     s = np.zeros(n)
-#     if source_node in node_to_idx:
-#         s[node_to_idx[source_node]] = 1.0
-
-#     p_current = s.copy()
-    
-#     # Pre-calculate degrees for efficiency
-#     degrees = dict(graph.degree())
-    
-#     for iteration in range(max_iterations):
-#         p_next = np.zeros(n)
-        
-#         # Calculate the random walk part
-#         for i in range(n):
-#             node_i = nodes[i]
-#             if degrees.get(node_i, 0) > 0:
-#                 p_current_val = p_current[i]
-#                 for neighbor in graph.neighbors(node_i):
-#                     p_next[node_to_idx[neighbor]] += p_current_val / degrees[node_i]
-
-#         # Apply the power iteration formula
-#         p_next = alpha * s + (1 - alpha) * p_next
-        
-#         # Check for convergence
-#         if np.linalg.norm(p_next - p_current, 1) < tolerance:
-#             return p_next
-            
-#         p_current = p_next.copy()
-        
-#     return p_current
-
 def compute_pagerank_series(graph, alpha, source_node, max_iterations=100):
     """
     Computes a personalized PageRank vector using the correct
@@ -64,7 +21,8 @@ def compute_pagerank_series(graph, alpha, source_node, max_iterations=100):
     n = graph.number_of_nodes()
     if n == 0:
         return np.array([])
-    nodes = list(graph.nodes())
+    
+    nodes = sorted(list(graph.nodes()))
     node_to_idx = {node: i for i, node in enumerate(nodes)}
 
     # Create the personalization vector 's'
@@ -73,7 +31,7 @@ def compute_pagerank_series(graph, alpha, source_node, max_iterations=100):
         s[node_to_idx[source_node]] = 1.0
 
     # Get the adjacency matrix A
-    A = nx.to_numpy_array(graph)
+    A = nx.to_numpy_array(graph, nodelist=nodes)
 
     # Get degrees
     degrees = np.array([graph.degree(node) for node in nodes])
@@ -101,10 +59,13 @@ def compute_next_scores(graph, current_scores=None, alpha=0.15, sigma=1.0, max_p
     Computes new scores based on Personalized PageRank.
     """
     n = graph.number_of_nodes()
-    nodes = list(graph.nodes())
+    if n == 0:
+        return []
+        
+    nodes = sorted(list(graph.nodes()))
     node_to_idx = {node: i for i, node in enumerate(nodes)}
     
-    if current_scores is None:
+    if current_scores is None or len(current_scores) != n:
         x = np.ones(n) / n
     else:
         x = np.array(current_scores)
@@ -157,10 +118,13 @@ def compute_next_scores_unnorm(graph, current_scores=None, alpha=0.15, sigma=1.0
     Computes new scores based on Personalized PageRank without normalization.
     """
     n = graph.number_of_nodes()
-    nodes = list(graph.nodes())
+    if n == 0:
+        return []
+
+    nodes = sorted(list(graph.nodes()))
     node_to_idx = {node: i for i, node in enumerate(nodes)}
     
-    if current_scores is None:
+    if current_scores is None or len(current_scores) != n:
         x = np.ones(n) / n
     else:
         x = np.array(current_scores)
