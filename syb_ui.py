@@ -66,13 +66,12 @@ class SYBUserInterface:
         self.current_batch_transactions = []
         self.last_batch_scores = None  # Store scores from last batch
 
-        # Timer for periodic updates (single-threaded)
-        self.update_timer = None
-        self.monitor_running = False
-
         self._create_widgets()
         self._create_interface()
         self._connect_events()
+
+        # Hook contract methods to trigger UI updates
+        self._hook_contract_updates()
 
     def _create_widgets(self):
         """Create UI widgets."""
@@ -258,10 +257,45 @@ class SYBUserInterface:
             with self.output_area:
                 print(f"❌ Error getting balance: {e}")
 
-    def _update_ui_periodic(self):
-        """Periodic update called from main thread timer."""
+    def _hook_contract_updates(self):
+        """Hook into contract methods to trigger UI updates."""
+        # Store original methods
+        original_deposit = self.contract.deposit
+        original_withdraw = self.contract.withdraw
+        original_vouch = self.contract.vouch
+        original_unvouch = self.contract.unvouch
+
+        # Wrap methods to trigger updates
+        def wrapped_deposit(*args, **kwargs):
+            result = original_deposit(*args, **kwargs)
+            self._check_and_update_ui()
+            return result
+
+        def wrapped_withdraw(*args, **kwargs):
+            result = original_withdraw(*args, **kwargs)
+            self._check_and_update_ui()
+            return result
+
+        def wrapped_vouch(*args, **kwargs):
+            result = original_vouch(*args, **kwargs)
+            self._check_and_update_ui()
+            return result
+
+        def wrapped_unvouch(*args, **kwargs):
+            result = original_unvouch(*args, **kwargs)
+            self._check_and_update_ui()
+            return result
+
+        # Replace methods
+        self.contract.deposit = wrapped_deposit
+        self.contract.withdraw = wrapped_withdraw
+        self.contract.vouch = wrapped_vouch
+        self.contract.unvouch = wrapped_unvouch
+
+    def _check_and_update_ui(self):
+        """Check if UI update and batch processing are needed."""
         try:
-            # Update all displays
+            # Update displays
             self._update_queue_display()
             self._update_current_status()
             self._update_last_batch_status()
@@ -360,30 +394,6 @@ class SYBUserInterface:
             else:
                 self.last_batch_display.value = "<div style='padding: 10px; color: #666;'>No batches forged yet</div>"
 
-    def _start_periodic_updates(self):
-        """Start periodic UI updates using ipywidgets timer."""
-        if not self.monitor_running:
-            self.monitor_running = True
-            self._schedule_next_update()
-
-    def _schedule_next_update(self):
-        """Schedule the next UI update."""
-        if self.monitor_running:
-            # Create a timer that calls update after 1 second
-            import threading
-            self.update_timer = threading.Timer(1.0, self._on_timer_tick)
-            self.update_timer.daemon = True
-            self.update_timer.start()
-
-    def _on_timer_tick(self):
-        """Called by timer - schedules UI update on main thread."""
-        try:
-            # Call the periodic update
-            self._update_ui_periodic()
-        finally:
-            # Schedule next update
-            self._schedule_next_update()
-
     def _forge_batch_sync(self):
         """Forge batch synchronously (called from main thread timer)."""
         if self.batch_processing:
@@ -477,23 +487,16 @@ class SYBUserInterface:
             print(f"❌ Error getting network status: {e}")
 
     def stop(self):
-        """Stop all periodic updates and cleanup."""
-        # Stop periodic updates
-        self.monitor_running = False
-        if self.update_timer:
-            self.update_timer.cancel()
-            self.update_timer = None
-
+        """Stop the simulator."""
         # Stop simulator
         if self.simulator:
             self.simulator.stop()
 
-        print("✅ Updates stopped")
+        print("✅ Simulator stopped")
 
     def resume(self):
-        """Resume the transaction simulator and monitoring."""
+        """Resume the transaction simulator."""
         print("🎬 Resuming transaction simulator (3s interval)...")
-        self._start_periodic_updates()
 
         self.simulator = TransactionSimulator(
             self.contract,
@@ -530,10 +533,7 @@ class SYBUserInterface:
         # Display the interface
         display(self.contract_interface)
 
-        # Start periodic UI updates
-        self._start_periodic_updates()
-
-        # Start transaction simulator
+        # Start transaction simulator (it will trigger UI updates via hooks)
         print("🎬 Starting transaction simulator (3s interval)...")
         self.simulator = TransactionSimulator(
             self.contract,
@@ -543,4 +543,4 @@ class SYBUserInterface:
             on_new_user_callback=self._on_new_user_created
         )
         self.simulator.start()
-        print("✅ Simulator started! Transactions will be generated automatically.")
+        print("✅ Simulator started! UI updates automatically on each transaction.")
