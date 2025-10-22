@@ -11,6 +11,10 @@ from utils import (
     TransactionSimulator,
     format_transaction_display
 )
+try:
+    from ipykernel.kernelbase import Kernel
+except ImportError:
+    Kernel = None
 
 def create_random_network(num_users=8, random_name='erdos_renyi', balance_range=(0.0, 0.1)) -> tuple:
     """Create a random network, initialize contract, and set up user interfaces."""
@@ -67,9 +71,14 @@ class SYBUserInterface:
         self.current_batch_transactions = []
         self.last_batch_scores = None  # Store scores from last batch
 
-        # Thread-safe widget update queue
-        self.update_lock = threading.Lock()
-        self.pending_updates = []
+        # Get reference to kernel for scheduling updates
+        try:
+            from IPython import get_ipython
+            self.ipython = get_ipython()
+            self.kernel = self.ipython.kernel if self.ipython else None
+        except:
+            self.ipython = None
+            self.kernel = None
 
         self._create_widgets()
         self._create_interface()
@@ -264,13 +273,54 @@ class SYBUserInterface:
 
     def _safe_widget_update(self, widget, value):
         """Safely update a widget value, handling thread context issues."""
-        try:
-            # Try direct update (works in main thread)
-            widget.value = value
-        except (RuntimeError, LookupError) as e:
-            # If we're in a background thread, store the update for later
-            with self.update_lock:
-                self.pending_updates.append((widget, value))
+        if threading.current_thread() is threading.main_thread():
+            # We're in the main thread, update directly
+            try:
+                widget.value = value
+                return
+            except:
+                pass
+
+        # We're in a background thread, schedule on kernel's event loop
+        if self.kernel and hasattr(self.kernel, 'io_loop'):
+            # Use tornado's IOLoop to schedule the update on the main thread
+            def update_widget():
+                try:
+                    widget.value = value
+                except Exception:
+                    pass
+
+            try:
+                self.kernel.io_loop.add_callback(update_widget)
+            except Exception:
+                # Fallback: just try to update directly and ignore errors
+                try:
+                    widget.value = value
+                except:
+                    pass
+        else:
+            # No kernel available, try direct update
+            try:
+                widget.value = value
+            except:
+                pass
+
+    def _safe_output_print(self, output_widget, message):
+        """Safely print to an Output widget from any thread."""
+        def do_print():
+            try:
+                with output_widget:
+                    print(message)
+            except Exception:
+                pass
+
+        if threading.current_thread() is threading.main_thread():
+            do_print()
+        elif self.kernel and hasattr(self.kernel, 'io_loop'):
+            try:
+                self.kernel.io_loop.add_callback(do_print)
+            except:
+                pass
 
     def _update_queue_display(self):
         """Update the transaction queue display."""
@@ -432,13 +482,31 @@ class SYBUserInterface:
 
     def _update_network_graph(self):
         """Update both network graph displays (last batch vs current)."""
-        try:
-            # Skip graph updates from background threads
-            # Graphs can only be updated from the main thread
-            # This is a limitation of ipywidgets Output widgets
-            pass
-        except Exception:
-            pass
+        def do_update():
+            try:
+                # Update current network graph
+                with self.current_graph_output:
+                    clear_output(wait=True)
+                    current_scores = self.contract.network.compute_score('pagerank')
+                    self.contract.network.display_graph(scores=current_scores, title="Current State")
+
+                # Update last batch network graph
+                with self.last_batch_graph_output:
+                    clear_output(wait=True)
+                    if self.last_batch_scores is not None:
+                        self.contract.network.display_graph(scores=self.last_batch_scores, title="Last Batch State")
+                    else:
+                        print("No previous batch data available")
+            except Exception:
+                pass
+
+        if threading.current_thread() is threading.main_thread():
+            do_update()
+        elif self.kernel and hasattr(self.kernel, 'io_loop'):
+            try:
+                self.kernel.io_loop.add_callback(do_update)
+            except:
+                pass
 
     def display_network_status(self):
         """Display network status summary."""
