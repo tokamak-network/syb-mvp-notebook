@@ -51,7 +51,7 @@ class Network:
             'ALPHA_PAGERANK': 0.15,
             'MAX_PR_ITERATIONS': 100,
         }
-        self._node_order = None
+        self._node_order = []
         self._update_node_order()
         self._ensure_balance_consistency()
     
@@ -106,11 +106,6 @@ class Network:
     
     def _update_node_order(self) -> None:
         """Update node order for consistent operations."""
-        if self.graph.number_of_nodes() == 0:
-            self._node_order = []
-            return
-        
-        # Sort nodes for consistent ordering
         self._node_order = sorted(self.graph.nodes())
     
     def _ensure_balance_consistency(self) -> None:
@@ -119,15 +114,13 @@ class Network:
         n_balances = len(self.balance_list)
         
         if n_balances < n_nodes:
-            # Pad with zeros
             self.balance_list.extend([0.0] * (n_nodes - n_balances))
         elif n_balances > n_nodes:
-            # Truncate
             self.balance_list = self.balance_list[:n_nodes]
     
     def to_matrix(self) -> Union[np.ndarray, csr_matrix]:
         """Convert graph to matrix representation."""
-        return nx.to_numpy_array(self.graph)
+        return nx.to_numpy_array(self.graph, nodelist=self._node_order)
     
     def get_graph(self) -> nx.Graph:
         """Get the underlying NetworkX graph."""
@@ -163,38 +156,26 @@ class Network:
     def add_node(self, node: Optional[int] = None, balance: float = 0.0, **attr) -> int:
         """Add a node to the graph. If node is None, automatically assign the next available ID."""
         if node is None:
-            # Auto-assign node ID based on existing nodes
-            if not self._node_order:
-                node = 0  # First node
-            else:
-                # Find the next available ID
-                max_id = max(self._node_order)
-                node = max_id + 1
+            node = max(self._node_order) + 1 if self._node_order else 0
         
-        self.graph.add_node(node, **attr)
-        self._update_node_order()
-        
-        # Insert balance at correct position
-        if node in self._node_order:
-            idx = self._node_order.index(node)
-            if idx < len(self.balance_list):
-                self.balance_list[idx] = balance
-            else:
-                self.balance_list.append(balance)
+        if node not in self.graph:
+            self.graph.add_node(node, **attr)
+            self._update_node_order()
+            insertion_idx = self._node_order.index(node)
+            self.balance_list.insert(insertion_idx, balance)
         else:
-            self.balance_list.append(balance)
-        
+            idx = self._node_order.index(node)
+            self.balance_list[idx] = balance
+
         self._ensure_balance_consistency()
-        print(f"Added node {node} with balance {balance}")
+        return node
     
     def remove_node(self, node: int) -> None:
         """Remove a node from the graph."""
         if node in self.graph:
-            # Remove balance
             if node in self._node_order:
                 idx = self._node_order.index(node)
-                if idx < len(self.balance_list):
-                    self.balance_list.pop(idx)
+                self.balance_list.pop(idx)
             
             self.graph.remove_node(node)
             self._update_node_order()
@@ -216,62 +197,65 @@ class Network:
 
         fallback_scores = np.ones(N_VERTICES) / N_VERTICES if N_VERTICES > 0 else np.array([])
         previous_scores = kwargs.get('previous_scores', None)
-        input = previous_scores if previous_scores is not None else fallback_scores
-        # TODO: check other layouts / 
-        pos = nx.spring_layout(G, seed=42)
+        input_scores = previous_scores if previous_scores is not None else fallback_scores
 
         if algo_name == 'random_walk':
-            return self._compute_random_walk(G, input, pos)
+            return self._compute_random_walk(G, input_scores)
         elif algo_name == 'pagerank':
-            return self._compute_pagerank(G, input, pos)
+            return self._compute_pagerank(G, input_scores)
         elif algo_name == 'equal_split':
-            return self._compute_equal_split(G, input, pos)
+            return self._compute_equal_split(G, input_scores)
         elif algo_name == 'argmax':
-            return self._compute_argmax(G, input, pos)
+            return self._compute_argmax(G, input_scores)
         else:
             raise ValueError(f"Unknown algorithm: {algo_name}")
     
-    def _compute_random_walk(self, G, input, pos) -> List[float]:
+    def _compute_random_walk(self, G, input_scores) -> List[float]:
         """Compute scores using random walk algorithm."""
-        scores = compute_random_walk(G, input)
-        plot_graph_with_scores(G, pos, scores, "Random Walk")
-        return scores
+        return compute_random_walk(G, input_scores)
     
-    def _compute_pagerank(self, G, input, pos) -> List[float]:
+    def _compute_pagerank(self, G, input_scores) -> List[float]:
         """Compute scores using PageRank algorithm."""
-        scores = compute_pagerank(G, input,
+        return compute_pagerank(G, input_scores,
                                 alpha=self.config['ALPHA_PAGERANK'],
                                 sigma=self.config['SIGMA_PAGERANK'],
                                 max_pr_iterations=self.config['MAX_PR_ITERATIONS'])
-        plot_graph_with_scores(G, pos, scores, "PageRank")
-        return scores
-    def _compute_equal_split(self, G, input, pos) -> List[float]:
-        """Compute scores using equal split algorithm (simplified version)."""
-        scores = compute_equal_split(G, input, sigma=self.config['SIGMA_EQUAL_SPLIT'])        
-        plot_graph_with_scores(G, pos, scores, "Equal Split")
-        return scores
+
+    def _compute_equal_split(self, G, input_scores) -> List[float]:
+        """Compute scores using equal split algorithm."""
+        return compute_equal_split(G, input_scores, sigma=self.config['SIGMA_EQUAL_SPLIT'])
     
-    def _compute_argmax(self, G, input, pos) -> List[float]:
-        """Compute scores using argmax algorithm (simplified version)."""
-        scores = compute_argmax(G, input, sigma=self.config['SIGMA_ARGMAX'])
-        plot_graph_with_scores(G, pos, scores, "Argmax")
-        return scores
+    def _compute_argmax(self, G, input_scores) -> List[float]:
+        """Compute scores using argmax algorithm."""
+        return compute_argmax(G, input_scores, sigma=self.config['SIGMA_ARGMAX'])
 
     def set_balance(self, node: int, balance: float) -> None:
         """Set balance for a specific node."""
         if node in self._node_order:
             idx = self._node_order.index(node)
-            if idx < len(self.balance_list):
-                self.balance_list[idx] = balance
-            else:
-                self.balance_list.append(balance)
+            self.balance_list[idx] = balance
         else:
-            self.add_node(node, balance)
+            self.add_node(node, balance=balance)
     
     def get_balance_list(self) -> List[float]:
         """Get balance list."""
         return self.balance_list
-    
+
+    def display_graph(self, scores: Optional[List[float]] = None, title: str = "Network Graph") -> None:
+        """
+        Visualizes the network graph with nodes colored by score and sized by balance.
+        """
+        if self.graph.number_of_nodes() == 0:
+            print("Network is empty.")
+            return
+
+        pos = nx.spring_layout(self.graph, seed=42)
+        
+        if scores is None:
+            scores = np.ones(len(self._node_order)) / len(self._node_order)
+        
+        plot_graph_with_scores(self.graph, pos, scores, title)
+
     def __repr__(self) -> str:
         """String representation of the network."""
         return f"Network(nodes={self.graph.number_of_nodes()}, edges={self.graph.number_of_edges()}, total_balance={sum(self.balance_list):.2f})"
@@ -288,22 +272,21 @@ class Network:
 # Example usage
 if __name__ == "__main__":
     # Create a random network
-    net = Network.init_random(25, balance_range=(10, 100), random_name='erdos_renyi')
+    net = Network.init_random(10, balance_range=(10, 100), random_name='erdos_renyi')
     print(f"Network: {net}")
-    print(f"Info: {net.get_info()}")
     
-    # Test different scoring algorithms
-    algorithms = ['random_walk', 'pagerank', 'equal_split', 'argmax']
+    # Compute scores
+    pagerank_scores = net.compute_score('pagerank')
+    print(f"PageRank Scores: {pagerank_scores}")
     
-    for algo in algorithms:
-        scores = net.compute_score(algo)
-        print(f"{algo}: {scores}")
+    # Display graph with scores
+    net.display_graph(scores=pagerank_scores, title="PageRank on Random Network")
     
-    # Test matrix conversion
-    A = net.to_matrix()
-    print(f"Vouch matrix:\n{A}")
-    
-    # Test graph modifications
-    net.add_edge(0, 4)
+    # Test modifications
+    net.add_node(10, balance=50.0)
+    net.add_edge(0, 10)
     net.set_balance(0, 200.0)
-    print(f"After modifications: {net.get_info()}")
+    print(f"\nAfter modifications: {net}")
+    
+    new_scores = net.compute_score('pagerank')
+    net.display_graph(scores=new_scores, title="After Modifying Network")
