@@ -67,6 +67,13 @@ class SYBUserInterface:
         self.current_batch_transactions = []
         self.last_batch_scores = None  # Store scores from last batch
 
+        # Flag to track if graphs need updating
+        self._graph_update_pending = False
+
+        # UI update loop control
+        self._ui_update_thread = None
+        self._ui_running = False
+
         self._create_widgets()
         self._create_interface()
         self._connect_events()
@@ -86,6 +93,7 @@ class SYBUserInterface:
         self.vouch_btn = widgets.Button(description='👍 Vouch', button_style='success')
         self.unvouch_btn = widgets.Button(description='👎 Unvouch', button_style='danger')
         self.balance_btn = widgets.Button(description='📊 Balance', button_style='info')
+        self.refresh_graph_btn = widgets.Button(description='🔄 Refresh Graph', button_style='info')
 
         self.deposit_submit = widgets.Button(description='Submit', button_style='success')
         self.withdraw_submit = widgets.Button(description='Submit', button_style='success')
@@ -118,7 +126,7 @@ class SYBUserInterface:
         self.vouch_section = widgets.VBox([self.vouch_target, self.vouch_submit], layout=widgets.Layout(display='none'))
         self.unvouch_section = widgets.VBox([self.unvouch_target, self.unvouch_submit], layout=widgets.Layout(display='none'))
 
-        button_row = widgets.HBox([self.deposit_btn, self.withdraw_btn, self.vouch_btn, self.unvouch_btn, self.balance_btn])
+        button_row = widgets.HBox([self.deposit_btn, self.withdraw_btn, self.vouch_btn, self.unvouch_btn, self.balance_btn, self.refresh_graph_btn])
 
         # Top row: Queue and Batch displays
         queue_box = widgets.VBox([
@@ -189,6 +197,7 @@ class SYBUserInterface:
         self.unvouch_submit.on_click(self._handle_unvouch)
 
         self.balance_btn.on_click(self._handle_balance)
+        self.refresh_graph_btn.on_click(self._handle_refresh_graph)
 
     def toggle_inputs(self, show_section=None):
         """Show one input section and hide others."""
@@ -258,111 +267,28 @@ class SYBUserInterface:
             with self.output_area:
                 print(f"❌ Error getting balance: {e}")
 
-    def _hook_contract_updates(self):
-        """Hook into contract methods to trigger UI updates."""
-        # Store original methods
-        original_deposit = self.contract.deposit
-        original_withdraw = self.contract.withdraw
-        original_vouch = self.contract.vouch
-        original_unvouch = self.contract.unvouch
-
-        # Wrap methods to trigger updates
-        def wrapped_deposit(*args, **kwargs):
-            result = original_deposit(*args, **kwargs)
-            self._check_and_update_ui()
-            return result
-
-        def wrapped_withdraw(*args, **kwargs):
-            result = original_withdraw(*args, **kwargs)
-            self._check_and_update_ui()
-            return result
-
-        def wrapped_vouch(*args, **kwargs):
-            result = original_vouch(*args, **kwargs)
-            self._check_and_update_ui()
-            return result
-
-        def wrapped_unvouch(*args, **kwargs):
-            result = original_unvouch(*args, **kwargs)
-            self._check_and_update_ui()
-            return result
-
-        # Replace methods
-        self.contract.deposit = wrapped_deposit
-        self.contract.withdraw = wrapped_withdraw
-        self.contract.vouch = wrapped_vouch
-        self.contract.unvouch = wrapped_unvouch
-
-    def _check_and_update_ui(self):
-        """Check if UI update and batch processing are needed."""
+    def _handle_refresh_graph(self, b):
+        """Manually refresh the network graphs."""
         try:
-            # Update displays
-            self._update_queue_display()
-            self._update_current_status()
-            self._update_last_batch_status()
+            with self.output_area:
+                clear_output(wait=True)
+                print("🔄 Refreshing network graphs...")
 
-            # Check if we need to auto-forge a batch
-            if not self.batch_processing and len(self.contract.unprocessed_txns) >= self.contract.batch_size:
-                # Schedule batch processing with a delay to allow UI to update
-                self._schedule_batch_processing()
-        except Exception:
-            pass
+            self._update_network_graph()
 
-    def _schedule_batch_processing(self):
-        """Schedule batch processing with a small delay to show animation."""
-        if self.batch_processing:
-            return
-
-        # Mark as processing and show animation immediately
-        self.batch_processing = True
-        self.current_batch_transactions = list(self.contract.unprocessed_txns)
-        self._update_batch_display(processing=True)
-
-        # Schedule actual batch processing after a tiny delay (allows UI to update)
-        timer = threading.Timer(0.1, self._forge_batch_delayed)
-        timer.daemon = True
-        timer.start()
-
-    def _forge_batch_delayed(self):
-        """Execute batch forging after delay (runs in background thread)."""
-        try:
-            # Save current scores as "last batch" before forging
-            self.last_batch_scores = self.contract.network.compute_score('pagerank')
-
-            # Process the batch
-            result = self.contract.forge_batch()
-
-            # Schedule UI updates on main thread
-            def update_ui_after_batch():
-                try:
-                    if result:
-                        self._update_network_graph()
-                        self._update_last_batch_status()
-
-                    # Clear batch display
-                    self.current_batch_transactions = []
-                    self._update_batch_display(processing=False)
-                    self._update_queue_display()
-                    self._update_current_status()
-                except Exception:
-                    pass
-                finally:
-                    self.batch_processing = False
-
-            # Try to schedule on event loop
-            try:
-                loop = asyncio.get_event_loop()
-                loop.call_soon_threadsafe(update_ui_after_batch)
-            except:
-                # Fallback: just update directly
-                update_ui_after_batch()
-
+            with self.output_area:
+                clear_output(wait=True)
+                print("✅ Graphs refreshed successfully!")
         except Exception as e:
-            try:
-                self.batch_display.value = f"<div style='padding: 10px; color: red;'>Batch error: {e}</div>"
-            except:
-                pass
-            self.batch_processing = False
+            with self.output_area:
+                clear_output(wait=True)
+                print(f"❌ Graph refresh failed: {e}")
+
+    def _hook_contract_updates(self):
+        """Hook into contract methods - no longer needed with continuous loop but kept for compatibility."""
+        # The continuous UI update loop handles everything now
+        # This method is kept as a stub to avoid breaking existing code
+        pass
 
     def _update_queue_display(self):
         """Update the transaction queue display."""
@@ -512,15 +438,20 @@ class SYBUserInterface:
             print(f"❌ Error getting network status: {e}")
 
     def stop(self):
-        """Stop the simulator."""
+        """Stop the simulator and UI update loop."""
+        # Stop UI update loop
+        self._ui_running = False
+        if self._ui_update_thread:
+            self._ui_update_thread.join(timeout=2)
+
         # Stop simulator
         if self.simulator:
             self.simulator.stop()
 
-        print("✅ Simulator stopped")
+        print("✅ Simulator and UI updates stopped")
 
     def resume(self):
-        """Resume the transaction simulator."""
+        """Resume the transaction simulator and UI updates."""
         print("🎬 Resuming transaction simulator (3s interval)...")
 
         self.simulator = TransactionSimulator(
@@ -531,7 +462,11 @@ class SYBUserInterface:
             on_new_user_callback=self._on_new_user_created
         )
         self.simulator.start()
-        print("✅ Simulator resumed! Transactions will be generated automatically.")
+
+        # Start UI update loop
+        self._start_ui_update_loop()
+
+        print("✅ Simulator and UI updates resumed! Transactions will be generated automatically.")
 
     def _on_new_user_created(self, new_addr: str, user_name: str):
         """Callback when a new user is created via CreateAccountDeposit."""
@@ -544,6 +479,85 @@ class SYBUserInterface:
                 print(f"👤 New user joined: {user_name} ({new_addr[:12]}...)")
         except Exception as e:
             pass  # Silently ignore errors
+
+    def _ui_update_loop(self):
+        """Continuous loop to update UI displays and process batches."""
+        import time
+
+        while self._ui_running:
+            try:
+                # Check if graph update is pending from previous batch
+                if self._graph_update_pending:
+                    self._graph_update_pending = False
+                    try:
+                        self._update_network_graph()
+                    except Exception as e:
+                        pass  # Silently ignore graph update errors
+
+                # Update all displays
+                self._update_queue_display()
+                self._update_current_status()
+                self._update_last_batch_status()
+
+                # Check if we need to auto-forge a batch
+                txns_count = len(self.contract.unprocessed_txns)
+                should_batch = (
+                    not self.batch_processing and
+                    txns_count >= self.contract.batch_size
+                )
+
+                if should_batch:
+                    # Start batch processing
+                    self.batch_processing = True
+                    self.current_batch_transactions = list(self.contract.unprocessed_txns)
+                    self._update_batch_display(processing=True)
+
+                    # Small delay for UI animation
+                    time.sleep(5)
+
+                    try:
+                        # Save current scores as "last batch" before forging
+                        self.last_batch_scores = self.contract.network.compute_score('pagerank')
+
+                        # Process the batch
+                        result = self.contract.forge_batch()
+
+                        if result:
+                            self._update_last_batch_status()
+                            # Mark that graphs need updating
+                            self._graph_update_pending = True
+
+                        # Clear batch display
+                        self.current_batch_transactions = []
+                        self._update_batch_display(processing=False)
+                        self._update_queue_display()
+                        self._update_current_status()
+
+                    except Exception as e:
+                        try:
+                            self.batch_display.value = f"<div style='padding: 10px; color: red;'>Batch error: {e}</div>"
+                        except:
+                            pass
+                    finally:
+                        self.batch_processing = False
+
+                # Sleep before next update cycle (check every 0.5 seconds)
+                time.sleep(0.5)
+
+            except Exception as e:
+                # If any error occurs, keep running but reset states
+                self.batch_processing = False
+                self._graph_update_pending = False
+                time.sleep(1)  # Wait a bit longer on errors
+
+    def _start_ui_update_loop(self):
+        """Start the continuous UI update loop in a background thread."""
+        if self._ui_running:
+            return  # Already running
+
+        self._ui_running = True
+        self._ui_update_thread = threading.Thread(target=self._ui_update_loop, daemon=True)
+        self._ui_update_thread.start()
 
     def display(self):
         """Display main contract interface."""
@@ -568,4 +582,8 @@ class SYBUserInterface:
             on_new_user_callback=self._on_new_user_created
         )
         self.simulator.start()
+
+        # Start continuous UI update loop
+        self._start_ui_update_loop()
+
         print("✅ Simulator started! UI updates automatically on each transaction.")
