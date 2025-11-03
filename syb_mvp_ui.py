@@ -394,22 +394,8 @@ class SYBMvpUserInterface:
                     # Show full graph
                     G = self.contract.network.copy()
 
-                # Get node positions using spring layout
-                pos = nx.spring_layout(G, seed=42)
-                
-                # Center the focus node if specified
-                if self.focus_node_idx is not None and self.focus_node_idx in pos:
-                    # Get center position (0, 0)
-                    center_x, center_y = 0.0, 0.0
-                    focus_pos = pos[self.focus_node_idx]
-                    
-                    # Calculate offset to move focus node to center
-                    offset_x = center_x - focus_pos[0]
-                    offset_y = center_y - focus_pos[1]
-                    
-                    # Shift all positions by the offset
-                    for node in pos:
-                        pos[node] = (pos[node][0] + offset_x, pos[node][1] + offset_y)
+                # Get node positions using shell layout
+                pos = nx.shell_layout(G)
 
                 # Create labels with addresses and scores, and prepare node data
                 node_order = sorted(G.nodes())
@@ -457,14 +443,111 @@ class SYBMvpUserInterface:
                 else:
                     node_sizes = [20] * len(node_order)
                 
-                # Prepare edge traces
+                # Prepare node colors list first
+                node_color_list = []
+                for idx in node_order:
+                    if idx == self.focus_node_idx:
+                        node_color_list.append('gold')  # Bright gold
+                    else:
+                        node_color_list.append('skyblue')
+                
+                # Prepare node sizes and colors final (needed for arrow positioning)
+                node_sizes_final = []
+                node_colors_final = []
+                for i, idx in enumerate(node_order):
+                    if idx == self.focus_node_idx:
+                        node_sizes_final.append(node_sizes[i] * 1.2)  # 20% larger
+                        node_colors_final.append('gold')  # Gold color
+                    else:
+                        node_sizes_final.append(node_sizes[i])
+                        node_colors_final.append(node_color_list[i])
+                
+                # Prepare edge traces with arrows (directed graph)
                 edge_x = []
                 edge_y = []
+                arrow_annotations_list = []
+                
+                # Ensure G is a DiGraph to get directed edges
+                if not isinstance(G, nx.DiGraph):
+                    G = nx.DiGraph(G)
+                
+                # Calculate node radii for arrow positioning
+                # Convert marker size to approximate coordinate space radius
+                # Get the range of positions to estimate scale
+                all_positions = [pos[node] for node in G.nodes()]
+                if all_positions:
+                    x_coords = [p[0] for p in all_positions]
+                    y_coords = [p[1] for p in all_positions]
+                    coord_range = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
+                    coord_range = coord_range if coord_range > 0 else 1.0
+                    
+                    # Estimate radius: node size in pixels -> fraction of coordinate range
+                    node_radii = {}
+                    for i, idx in enumerate(node_order):
+                        size = node_sizes_final[i] if i < len(node_sizes_final) else 20
+                        # Convert size (15-40 range) to coordinate units
+                        # Rough estimate: 1% of coordinate range per 10 pixels of size
+                        node_radii[idx] = (size / 100.0) * (coord_range * 0.01)
+                else:
+                    node_radii = {idx: 0.02 for idx in node_order}
+                
                 for edge in G.edges():
                     x0, y0 = pos[edge[0]]
                     x1, y1 = pos[edge[1]]
-                    edge_x.extend([x0, x1, None])
-                    edge_y.extend([y0, y1, None])
+                    
+                    # Calculate direction vector
+                    dx = x1 - x0
+                    dy = y1 - y0
+                    length = np.sqrt(dx**2 + dy**2)
+                    
+                    if length > 0:
+                        # Normalize direction
+                        dx_norm = dx / length
+                        dy_norm = dy / length
+                        
+                        # Get target node radius
+                        target_radius = node_radii.get(edge[1], 0.02)
+                        
+                        # Calculate arrow end point: stop at edge of target node
+                        # Move back from center by the node radius
+                        arrow_end_x = x1 - dx_norm * target_radius
+                        arrow_end_y = y1 - dy_norm * target_radius
+                        
+                        # Calculate arrow start point: slightly before the end
+                        arrow_start_offset = target_radius * 0.2  # Small gap before arrow
+                        arrow_start_x = arrow_end_x - dx_norm * arrow_start_offset
+                        arrow_start_y = arrow_end_y - dy_norm * arrow_start_offset
+                        
+                        # Draw the edge line (stop before target node)
+                        edge_end_x = arrow_end_x - dx_norm * target_radius * 0.5
+                        edge_end_y = arrow_end_y - dy_norm * target_radius * 0.5
+                        edge_x.extend([x0, edge_end_x, None])
+                        edge_y.extend([y0, edge_end_y, None])
+                        
+                        # Add arrow annotation pointing from source to target
+                        arrow_annotations_list.append(
+                            dict(
+                                ax=arrow_start_x,
+                                ay=arrow_start_y,
+                                x=arrow_end_x,
+                                y=arrow_end_y,
+                                xref="x",
+                                yref="y",
+                                axref="x",
+                                ayref="y",
+                                showarrow=True,
+                                arrowhead=2,
+                                arrowsize=1.0,
+                                arrowwidth=1.2,
+                                arrowcolor="#666",
+                                standoff=0,  # No standoff since we calculated it manually
+                                startstandoff=0
+                            )
+                        )
+                    else:
+                        # Zero length edge (shouldn't happen)
+                        edge_x.extend([x0, x1, None])
+                        edge_y.extend([y0, y1, None])
                 
                 edge_trace = go.Scatter(
                     x=edge_x, y=edge_y,
@@ -477,30 +560,22 @@ class SYBMvpUserInterface:
                 node_x = []
                 node_y = []
                 node_text = []
-                node_color_list = []
                 
                 for idx in node_order:
                     x, y = pos[idx]
                     node_x.append(x)
                     node_y.append(y)
                     node_text.append(labels[idx])
-                    # Color focus node gold, others skyblue
-                    if idx == self.focus_node_idx:
-                        node_color_list.append('gold')
-                    else:
-                        node_color_list.append('skyblue')
                 
                 node_trace = go.Scatter(
                     x=node_x, y=node_y,
-                    mode='markers+text',
+                    mode='markers',
                     hoverinfo='text',
-                    text=[node_names[idx] for idx in node_order],
-                    textposition="middle center",
-                    textfont=dict(size=10, color='black'),
                     hovertext=node_text,
                     marker=dict(
-                        color=node_color_list,  # Gold for focus node, skyblue for others
-                        size=node_sizes,  # Size based on score
+                        color=node_colors_final,  # Gold for focus node, skyblue for others
+                        size=node_sizes_final,  # Size based on score, larger for focus node
+                        opacity=1.0,  # Fully opaque, not transparent
                         line=dict(width=2, color='black')
                     )
                 )
@@ -522,14 +597,16 @@ class SYBMvpUserInterface:
                         showlegend=False,
                         hovermode='closest',
                         margin=dict(b=20, l=5, r=5, t=40),
-                        annotations=[dict(
-                            text="Node size represents score (larger = higher score)",
-                            showarrow=False,
-                            xref="paper", yref="paper",
-                            x=0.005, y=-0.002,
-                            xanchor="left", yanchor="bottom",
-                            font=dict(color="#888", size=12)
-                        )],
+                        annotations=[
+                            dict(
+                                text="Node size represents score (larger = higher score)",
+                                showarrow=False,
+                                xref="paper", yref="paper",
+                                x=0.005, y=-0.002,
+                                xanchor="left", yanchor="bottom",
+                                font=dict(color="#888", size=12)
+                            )
+                        ] + arrow_annotations_list,
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         plot_bgcolor='white'
@@ -632,7 +709,7 @@ class SYBMvpUserInterface:
             self._update_graph()
         else:
             raise ValueError(f"Address {address} not found")
-    
+
     def _update_all(self):
         """Update all UI elements."""
         self._update_user_info()
