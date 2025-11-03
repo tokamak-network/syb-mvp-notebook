@@ -7,6 +7,8 @@ from utils import generate_mul_eth_addresses
 import networkx as nx
 from comparison import plot_graph_with_scores
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import numpy as np
 
 
 def create_random_mvp_network(num_users=8) -> tuple:
@@ -18,12 +20,12 @@ def create_random_mvp_network(num_users=8) -> tuple:
     """
     print(f"📊 Creating MVP network with {num_users} users...")
     
-    # Create some initial vouches (seed the network)
-    print("\n🤝 Creating initial vouching relationships...")
-    
     # NOTE: could change this into other random graph from networkx
-    network = nx.erdos_renyi_graph(num_users, 0.25, directed=True)
-    print(f"Network nodes: {network.nodes()}")
+    network = nx.erdos_renyi_graph(num_users, 0.2, directed=True)
+    # filter the edge from node zero
+
+    edges_to_remove = [edge for edge in network.edges() if 0 in edge]
+    network.remove_edges_from(edges_to_remove)
     contract = VouchMinimal(network)
     
     print(f"✅ Created {contract.network.number_of_edges()} initial vouches")
@@ -31,8 +33,6 @@ def create_random_mvp_network(num_users=8) -> tuple:
     # Build users dictionary
     users = {}
     addresses = contract.idx_to_address.values()
-    print(f"idx_to_address: {contract.idx_to_address}")
-    print(f"Addresses: {addresses}")
     user_names = [f"User {i}" for i in range(num_users)]
     for i, addr in enumerate(addresses):
         users[addr] = {
@@ -60,6 +60,11 @@ class SYBMvpUserInterface:
         self.current_user_address = current_user_address
         self._handlers_connected = False  # Track if handlers are already connected
         self._updating_graph = False  # Prevent duplicate graph updates
+        self.focus_node_idx = None  # Node index to focus on (None = show all, or specific node index)
+        
+        # Set focus to current user's node by default
+        if current_user_address in contract.address_to_idx:
+            self.focus_node_idx = contract.address_to_idx[current_user_address]
         
         self._create_widgets()
         self._create_interface()
@@ -340,8 +345,9 @@ class SYBMvpUserInterface:
         
         # Sort by score descending
         # TODO: add button to sort by rank, score, outdeg, indeg, username
-        user_stats.sort(key=lambda x: x['score'], reverse=True)
-        
+        # default: sorted by names
+        user_stats.sort(key=lambda x: x['name'])
+
         # Build HTML
         stats_html = f"""
         <div style='padding: 10px; font-size: 13px;'>
@@ -398,7 +404,6 @@ class SYBMvpUserInterface:
             return
 
         self._updating_graph = True
-        fig = None
         try:
             with self.graph_output:
                 clear_output(wait=True)
@@ -410,71 +415,268 @@ class SYBMvpUserInterface:
                 # Get scores for visualization
                 scores = self.contract.compute_scores_for_display()
 
-                # Get node positions
-                pos = nx.spring_layout(self.contract.network, seed=42)
+                # Determine which graph to show: full graph or subgraph focused on a node
+                if self.focus_node_idx is not None and self.focus_node_idx in self.contract.network.nodes():
+                    # Find the weakly connected component containing the focus node
+                    # This includes all transitively connected nodes
+                    focus_node = self.focus_node_idx
+                    connected_components = list(nx.weakly_connected_components(self.contract.network))
+                    
+                    # Find the component that contains the focus node
+                    connected_nodes = None
+                    for component in connected_components:
+                        if focus_node in component:
+                            connected_nodes = component
+                            break
+                    
+                    # If found, create subgraph with the connected component
+                    if connected_nodes:
+                        G = self.contract.network.subgraph(list(connected_nodes)).copy()
+                    else:
+                        # Fallback: just the focus node itself
+                        G = self.contract.network.subgraph([focus_node]).copy()
+                else:
+                    # Show full graph
+                    G = self.contract.network.copy()
 
-                # Create labels with addresses and scores
-                node_order = sorted(self.contract.network.nodes())
+                # Get node positions using spring layout
+                pos = nx.spring_layout(G, seed=42)
+                
+                # Center the focus node if specified
+                if self.focus_node_idx is not None and self.focus_node_idx in pos:
+                    # Get center position (0, 0)
+                    center_x, center_y = 0.0, 0.0
+                    focus_pos = pos[self.focus_node_idx]
+                    
+                    # Calculate offset to move focus node to center
+                    offset_x = center_x - focus_pos[0]
+                    offset_y = center_y - focus_pos[1]
+                    
+                    # Shift all positions by the offset
+                    for node in pos:
+                        pos[node] = (pos[node][0] + offset_x, pos[node][1] + offset_y)
+
+                # Create labels with addresses and scores, and prepare node data
+                node_order = sorted(G.nodes())
                 labels = {}
+                node_scores = {}
+                node_ranks = {}
+                node_names = {}
+                
                 for idx in node_order:
                     address = self.contract.idx_to_address.get(idx)
                     if address:
                         user_name = self.users[address]['name']
-                        score_idx = node_order.index(idx)
+                        # Get score index from full network node order
+                        full_node_order = sorted(self.contract.network.nodes())
+                        score_idx = full_node_order.index(idx) if idx in full_node_order else 0
                         score_val = scores[score_idx] if score_idx < len(scores) else 0.0
                         rank = self.contract.get_rank(address)
                         rank_display = "D" if rank >= DEFAULT_RANK else str(rank)
-                        labels[idx] = f"{user_name}\nR:{rank_display}\nS:{score_val:.2f}"
+                        
+                        labels[idx] = f"{user_name}<br>Rank: {rank_display}<br>Score: {score_val:,.0f}"
+                        node_scores[idx] = score_val
+                        node_ranks[idx] = rank_display
+                        node_names[idx] = user_name
                     else:
-                        labels[idx] = str(idx)
-
-                # Create figure with interactive mode OFF
-                plt.ioff()
-                fig, ax = plt.subplots(figsize=(12, 10))
-                nx.draw(
-                    self.contract.network,
-                    pos,
-                    ax=ax,
-                    with_labels=False,
-                    node_color='skyblue',
-                    node_size=1500,
-                    edge_color='gray',
-                    width=2,
-                    arrows=True,
-                    arrowsize=20,
-                    arrowstyle='->'
+                        labels[idx] = f"Node {idx}"
+                        node_scores[idx] = 0.0
+                        node_ranks[idx] = "N/A"
+                        node_names[idx] = f"Node {idx}"
+                
+                # Calculate node sizes based on scores (normalize to reasonable size range)
+                score_values = [node_scores[idx] for idx in node_order]
+                if score_values and max(score_values) > 0:
+                    min_score = min(score_values)
+                    max_score = max(score_values)
+                    # Normalize to size range (15-40 for nodes)
+                    node_sizes = []
+                    for idx in node_order:
+                        score = node_scores[idx]
+                        if max_score > min_score:
+                            normalized = (score - min_score) / (max_score - min_score)
+                            size = 15 + normalized * 25  # Range from 15 to 40
+                        else:
+                            size = 20  # Default size if all scores are the same
+                        node_sizes.append(size)
+                else:
+                    node_sizes = [20] * len(node_order)
+                
+                # Prepare edge traces
+                edge_x = []
+                edge_y = []
+                for edge in G.edges():
+                    x0, y0 = pos[edge[0]]
+                    x1, y1 = pos[edge[1]]
+                    edge_x.extend([x0, x1, None])
+                    edge_y.extend([y0, y1, None])
+                
+                edge_trace = go.Scatter(
+                    x=edge_x, y=edge_y,
+                    line=dict(width=2, color='#888'),
+                    hoverinfo='none',
+                    mode='lines'
                 )
-                nx.draw_networkx_labels(
-                    self.contract.network,
-                    pos,
-                    labels=labels,
-                    ax=ax,
-                    font_size=9,
-                    font_color='black'
+                
+                # Prepare node traces with sizes based on scores
+                node_x = []
+                node_y = []
+                node_text = []
+                node_color_list = []
+                
+                for idx in node_order:
+                    x, y = pos[idx]
+                    node_x.append(x)
+                    node_y.append(y)
+                    node_text.append(labels[idx])
+                    # Color focus node gold, others skyblue
+                    if idx == self.focus_node_idx:
+                        node_color_list.append('gold')
+                    else:
+                        node_color_list.append('skyblue')
+                
+                node_trace = go.Scatter(
+                    x=node_x, y=node_y,
+                    mode='markers+text',
+                    hoverinfo='text',
+                    text=[node_names[idx] for idx in node_order],
+                    textposition="middle center",
+                    textfont=dict(size=10, color='black'),
+                    hovertext=node_text,
+                    marker=dict(
+                        color=node_color_list,  # Gold for focus node, skyblue for others
+                        size=node_sizes,  # Size based on score
+                        line=dict(width=2, color='black')
+                    )
                 )
-                ax.set_title("Network Graph (Rank & Score)", fontsize=16, fontweight='bold')
-                ax.axis('off')
-                plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
-
-                # Render to buffer and display as image to avoid matplotlib display hooks
-                import io
-                from IPython.display import display as ipy_display, Image as IPyImage
-
-                buf = io.BytesIO()
-                fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-                buf.seek(0)
-                img_data = buf.getvalue()
-                buf.close()
-
-                # Display the image directly - bypasses matplotlib's display system
-                ipy_display(IPyImage(data=img_data))
+                
+                # Create figure
+                title_text = (
+                    f"SYB Network Graph - Focused on {node_names.get(self.focus_node_idx, 'Node')}"
+                    if self.focus_node_idx is not None and self.focus_node_idx in self.contract.network.nodes()
+                    else "SYB Network Graph (Rank & Score) - Full View"
+                )
+                
+                fig = go.Figure(
+                    data=[edge_trace, node_trace],
+                    layout=go.Layout(
+                        title=dict(
+                            text=title_text,
+                            font=dict(size=18)
+                        ),
+                        showlegend=False,
+                        hovermode='closest',
+                        margin=dict(b=20, l=5, r=5, t=40),
+                        annotations=[dict(
+                            text="Node size represents score (larger = higher score)",
+                            showarrow=False,
+                            xref="paper", yref="paper",
+                            x=0.005, y=-0.002,
+                            xanchor="left", yanchor="bottom",
+                            font=dict(color="#888", size=12)
+                        )],
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        plot_bgcolor='white'
+                    )
+                )
+                
+                # Display plotly figure in Jupyter widget output
+                from IPython.display import display
+                display(fig)
+                
+                # TODO: an alternative to use the matplotlib code to display the graph
+                # COMMENTED OUT: Original matplotlib code
+                # # Create figure with interactive mode OFF
+                # plt.ioff()
+                # fig, ax = plt.subplots(figsize=(12, 10))
+                # 
+                # # Color the focus node differently
+                # node_colors = []
+                # node_sizes = []
+                # for node in node_order:
+                #     if node == self.focus_node_idx:
+                #         node_colors.append('gold')
+                #         node_sizes.append(2000)
+                #     else:
+                #         node_colors.append('skyblue')
+                #         node_sizes.append(1500)
+                # 
+                # nx.draw(
+                #     G,
+                #     pos,
+                #     ax=ax,
+                #     with_labels=False,
+                #     node_color=node_colors,
+                #     node_size=node_sizes,
+                #     edge_color='gray',
+                #     width=2,
+                #     arrows=True,
+                #     arrowsize=20,
+                #     arrowstyle='->'
+                # )
+                # nx.draw_networkx_labels(
+                #     G,
+                #     pos,
+                #     labels=labels,
+                #     ax=ax,
+                #     font_size=9,
+                #     font_color='black'
+                # )
+                # # Update title based on whether showing subgraph or full graph
+                # if self.focus_node_idx is not None and self.focus_node_idx in self.contract.network.nodes():
+                #     focus_name = labels.get(self.focus_node_idx, f"Node {self.focus_node_idx}")
+                #     # Extract just the name part (before newline)
+                #     focus_display = focus_name.split('\n')[0] if '\n' in focus_name else focus_name
+                #     title = f"SYB Network Graph - Focused on {focus_display}"
+                # else:
+                #     title = "SYB Network Graph (Rank & Score) - Full View"
+                # ax.set_title(title, fontsize=18, fontweight='bold')
+                # ax.axis('off')
+                # plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
+                #
+                # # Render to buffer and display as image to avoid matplotlib display hooks
+                # import io
+                # from IPython.display import display as ipy_display, Image as IPyImage
+                #
+                # buf = io.BytesIO()
+                # fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+                # buf.seek(0)
+                # img_data = buf.getvalue()
+                # buf.close()
+                #
+                # # Display the image directly - bypasses matplotlib's display system
+                # ipy_display(IPyImage(data=img_data))
         finally:
-            # Always close the figure to prevent accumulation
-            if fig is not None:
-                plt.close(fig)
-            else:
-                plt.close('all')
             self._updating_graph = False
+    
+    def set_focus_node(self, node_idx: int = None):
+        """
+        Set the focus node for the graph visualization.
+        
+        Args:
+            node_idx: Node index to focus on (None to show full graph)
+        """
+        if node_idx is None:
+            self.focus_node_idx = None
+        elif node_idx in self.contract.network.nodes():
+            self.focus_node_idx = node_idx
+        else:
+            raise ValueError(f"Node {node_idx} not found in network")
+        self._update_graph()
+    
+    def set_focus_by_address(self, address: str):
+        """
+        Set the focus node by user address.
+        
+        Args:
+            address: User address to focus on
+        """
+        if address in self.contract.address_to_idx:
+            self.focus_node_idx = self.contract.address_to_idx[address]
+            self._update_graph()
+        else:
+            raise ValueError(f"Address {address} not found")
     
     def _update_all(self):
         """Update all UI elements."""
