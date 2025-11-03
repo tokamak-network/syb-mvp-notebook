@@ -83,16 +83,6 @@ class SYBMvpUserInterface:
             button_style='danger',
             layout=widgets.Layout(width='150px')
         )
-        self.refresh_graph_btn = widgets.Button(
-            description='🔄 Refresh Graph',
-            button_style='info',
-            layout=widgets.Layout(width='150px')
-        )
-        self.refresh_status_btn = widgets.Button(
-            description='📊 Refresh Status',
-            button_style='info',
-            layout=widgets.Layout(width='150px')
-        )
         
         # Input dropdowns
         self.vouch_target = widgets.Dropdown(
@@ -159,16 +149,10 @@ class SYBMvpUserInterface:
             self.unvouch_btn
         ], layout=widgets.Layout(margin='5px'))
         
-        refresh_row = widgets.HBox([
-            self.refresh_graph_btn,
-            self.refresh_status_btn
-        ], layout=widgets.Layout(margin='5px'))
-        
         actions_box = widgets.VBox([
             widgets.HTML(value="<h3>⚡ Actions</h3>"),
             vouch_row,
             unvouch_row,
-            refresh_row,
             self.action_output
         ], layout=widgets.Layout(border='2px solid #4CAF50', padding='15px'))
         
@@ -201,14 +185,10 @@ class SYBMvpUserInterface:
         # Clear any existing handlers first to prevent duplicates
         self.vouch_btn._click_handlers.callbacks.clear()
         self.unvouch_btn._click_handlers.callbacks.clear()
-        self.refresh_graph_btn._click_handlers.callbacks.clear()
-        self.refresh_status_btn._click_handlers.callbacks.clear()
         
         # Now connect handlers
         self.vouch_btn.on_click(self._handle_vouch)
         self.unvouch_btn.on_click(self._handle_unvouch)
-        self.refresh_graph_btn.on_click(self._handle_refresh_graph)
-        self.refresh_status_btn.on_click(self._handle_refresh_status)
         
         self._handlers_connected = True
     
@@ -255,31 +235,6 @@ class SYBMvpUserInterface:
                 
             except Exception as e:
                 print(f"❌ Unvouch failed: {e}")
-    
-    def _handle_refresh_graph(self, b):
-        """Refresh the network graph."""
-        with self.action_output:
-            clear_output(wait=True)
-            print("🔄 Refreshing graph...")
-        
-        self._update_graph()
-        
-        with self.action_output:
-            clear_output(wait=True)
-            print("✅ Graph refreshed!")
-    
-    def _handle_refresh_status(self, b):
-        """Refresh status displays."""
-        with self.action_output:
-            clear_output(wait=True)
-            print("🔄 Refreshing status...")
-        
-        self._update_status()
-        self._update_user_info()
-        
-        with self.action_output:
-            clear_output(wait=True)
-            print("✅ Status refreshed!")
     
     def _update_user_info(self):
         """Update current user information display."""
