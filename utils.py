@@ -12,6 +12,51 @@ def generate_mul_eth_addresses(n):
     return [generate_random_eth_address() for _ in range(n)]
 
 
+def generate_alphabetical_names(n: int) -> List[str]:
+    """
+    Generate alphabetical names in order: Alice, Bob, Charlie, David, etc.
+    
+    Args:
+        n: Number of names to generate
+        
+    Returns:
+        List of names in alphabetical order
+    """
+    # Common first names in alphabetical order
+    names = [
+        "Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Henry",
+        "Ivy", "Jack", "Kate", "Leo", "Mia", "Noah", "Olivia", "Paul",
+        "Quinn", "Rachel", "Sam", "Tina", "Uma", "Victor", "Wendy", "Xavier",
+        "Yara", "Zoe", 
+        # Second batch
+        "Aaron", "Bella", "Clara", "Dylan", "Eliza", "Finn", "Gina", "Hank",
+        "Isabel", "Joel", "Kira", "Liam", "Mona", "Nate", "Opal", "Perry",
+        "Quincy", "Rosa", "Seth", "Tara", "Uri", "Vera", "Will", "Xena",
+        "Yosef", "Zara",
+        # Third batch
+        "Ava", "Ben", "Cara", "Derek", "Elsa", "Felix", "Gia", "Harvey",
+        "Ingrid", "Jade", "Kyle", "Leah", "Mason", "Nina", "Omar", "Paula",
+        "Queenie", "Rex", "Sara", "Trevor", "Ulric", "Violet", "Wade", "Ximena",
+        "Yvonne", "Zander",
+    ]
+    
+    # If we need more than 26, extend with numbered variants
+    if n > len(names):
+        # Repeat pattern with numbers
+        extended = []
+        for i in range(n):
+            if i < len(names):
+                extended.append(names[i])
+            else:
+                # Continue with pattern: Alice2, Bob2, etc.
+                base_idx = i % len(names)
+                suffix = (i // len(names)) + 1
+                extended.append(f"{names[base_idx]}{suffix}")
+        return extended[:n]
+    
+    return names[:n]
+
+
 def format_address(address: str, prefix_len: int = 6, suffix_len: int = 4) -> str:
     """Format ethereum address for display: 0xab15...1234"""
     if not address or len(address) < prefix_len + suffix_len:
