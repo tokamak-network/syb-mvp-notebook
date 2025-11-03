@@ -115,13 +115,15 @@ class VouchMinimal:
         node = self.nodes.get(address)
         if not node or len(node.in_neighbors) == 0:
             if address in self.nodes:
-                # Save previous rank before updating
-                self.nodes[address].previous_rank = self.nodes[address].rank
+                # Only save previous rank if it was actually computed (non-zero)
+                if self.nodes[address].rank != 0:
+                    self.nodes[address].previous_rank = self.nodes[address].rank
                 self.nodes[address].rank = DEFAULT_RANK
             return
         
-        # Save previous rank before updating
-        node.previous_rank = node.rank
+        # Only save previous rank if it was actually computed (non-zero)
+        if node.rank != 0:
+            node.previous_rank = node.rank
         
         # Find minimum rank and its multiplicity
         k = DEFAULT_RANK
@@ -150,8 +152,9 @@ class VouchMinimal:
         if not node:
             return
         
-        # Save previous score before updating
-        node.previous_score = node.score
+        # Only save previous score if it was actually computed (non-zero)
+        if node.score != 0:
+            node.previous_score = node.score
         
         s = 0
         
@@ -211,9 +214,11 @@ class VouchMinimal:
         
         # Bootstrap logic: first 5 vouches (0-4) seed endpoints to rank=1
         if self.seed_vouch_count < 5:
-            # Save previous ranks before updating
-            from_node.previous_rank = from_node.rank
-            to_node.previous_rank = to_node.rank
+            # Only save previous ranks if they were actually computed (non-zero)
+            if from_node.rank != 0:
+                from_node.previous_rank = from_node.rank
+            if to_node.rank != 0:
+                to_node.previous_rank = to_node.rank
             
             # Set both endpoints to rank 1
             from_node.rank = 1
