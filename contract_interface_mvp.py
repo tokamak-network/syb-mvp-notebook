@@ -138,7 +138,7 @@ class VouchMinimal:
                 m += 1
         
         rv = 3 * k + 1 - m
-        if rv == 0:
+        if rv <= 0: # bc they're integers instead of unsigned integers
             rv = 1
         
         node.rank = rv
