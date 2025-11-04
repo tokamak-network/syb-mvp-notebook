@@ -413,7 +413,7 @@ class SYBMvpUserInterface:
                         score_idx = full_node_order.index(idx) if idx in full_node_order else 0
                         score_val = scores[score_idx] if score_idx < len(scores) else 0.0
                         rank = self.contract.get_rank(address)
-                        rank_display = "D" if rank >= DEFAULT_RANK else str(rank)
+                        rank_display = "Default rank" if rank >= DEFAULT_RANK else str(rank)
                         
                         labels[idx] = f"{user_name}<br>Rank: {rank_display}<br>Score: {score_val:,.0f}"
                         node_scores[idx] = score_val
@@ -425,42 +425,47 @@ class SYBMvpUserInterface:
                         node_ranks[idx] = "N/A"
                         node_names[idx] = f"Node {idx}"
                 
-                # Calculate node sizes based on scores (normalize to reasonable size range)
-                score_values = [node_scores[idx] for idx in node_order]
-                if score_values and max(score_values) > 0:
-                    min_score = min(score_values)
-                    max_score = max(score_values)
-                    # Normalize to size range (15-40 for nodes)
-                    node_sizes = []
-                    for idx in node_order:
-                        score = node_scores[idx]
-                        if max_score > min_score:
-                            normalized = (score - min_score) / (max_score - min_score)
-                            size = 15 + normalized * 25  # Range from 15 to 40
-                        else:
-                            size = 20  # Default size if all scores are the same
-                        node_sizes.append(size)
+                # Map scores to colors using continuous colormap
+                import matplotlib.cm as cm
+                import matplotlib.colors as mcolors
+                
+                # Collect all score values for color mapping
+                score_values_list = [node_scores[idx] for idx in node_order]
+                
+                # Get min and max scores for normalization
+                if score_values_list:
+                    min_score = min(score_values_list)
+                    max_score = max(score_values_list)
                 else:
-                    node_sizes = [20] * len(node_order)
+                    min_score = 0
+                    max_score = 1
                 
-                # Prepare node colors list first
-                node_color_list = []
-                for idx in node_order:
-                    if idx == self.focus_node_idx:
-                        node_color_list.append('gold')  # Bright gold
-                    else:
-                        node_color_list.append('skyblue')
+                # Use viridis colormap for continuous score values
+                colormap = cm.get_cmap('viridis')
                 
-                # Prepare node sizes and colors final
-                node_sizes_final = []
+                # Prepare node colors based on score
                 node_colors_final = []
-                for i, idx in enumerate(node_order):
-                    if idx == self.focus_node_idx:
-                        node_sizes_final.append(node_sizes[i] * 1.2)  # 20% larger
-                        node_colors_final.append('gold')  # Gold color
+                node_sizes_final = []
+                for idx in node_order:
+                    score = node_scores[idx]
+                    
+                    # Normalize score to [0, 1] for colormap
+                    if max_score > min_score:
+                        normalized_score = (score - min_score) / (max_score - min_score)
                     else:
-                        node_sizes_final.append(node_sizes[i])
-                        node_colors_final.append(node_color_list[i])
+                        normalized_score = 0.5  # Default if all scores are the same
+                    
+                    # Get color from colormap
+                    rgba = colormap(normalized_score)
+                    color = mcolors.rgb2hex(rgba)
+                    
+                    node_colors_final.append(color)
+                    
+                    # Highlight focus node with slightly larger size (border handled in separate trace)
+                    if idx == self.focus_node_idx:
+                        node_sizes_final.append(30)  # Slightly larger for focus
+                    else:
+                        node_sizes_final.append(25)  # Uniform size for non-focus nodes
                 
                 # Prepare edge traces (simple lines, no arrows)
                 edge_x = []
@@ -484,27 +489,175 @@ class SYBMvpUserInterface:
                     mode='lines'
                 )
                 
-                # Prepare node traces with sizes based on scores
-                node_x = []
-                node_y = []
-                node_text = []
+                # Prepare node traces - separate for focus and non-focus nodes
+                node_x_focus = []
+                node_y_focus = []
+                node_text_focus = []
+                node_colors_focus = []
+                node_sizes_focus = []
+                
+                node_x_normal = []
+                node_y_normal = []
+                node_text_normal = []
+                node_colors_normal = []
+                node_sizes_normal = []
                 
                 for idx in node_order:
                     x, y = pos[idx]
-                    node_x.append(x)
-                    node_y.append(y)
-                    node_text.append(labels[idx])
+                    address = self.contract.idx_to_address.get(idx)
+                    if address:
+                        rank = self.contract.get_rank(address)
+                        rank_display = "D" if rank >= DEFAULT_RANK else str(rank)
+                        score_val = node_scores[idx]
+                        user_name = node_names[idx]
+                        label = f"{user_name}<br>Rank: {rank_display}<br>Score: {score_val:,.0f}"
+                    else:
+                        label = f"Node {idx}"
+                    
+                    if idx == self.focus_node_idx:
+                        node_x_focus.append(x)
+                        node_y_focus.append(y)
+                        node_text_focus.append(label)
+                        node_colors_focus.append(node_colors_final[node_order.index(idx)])
+                        node_sizes_focus.append(node_sizes_final[node_order.index(idx)])
+                    else:
+                        node_x_normal.append(x)
+                        node_y_normal.append(y)
+                        node_text_normal.append(label)
+                        node_colors_normal.append(node_colors_final[node_order.index(idx)])
+                        node_sizes_normal.append(node_sizes_final[node_order.index(idx)])
                 
-                node_trace = go.Scatter(
-                    x=node_x, y=node_y,
+                # Create traces for normal nodes and focus node separately
+                node_trace_normal = go.Scatter(
+                    x=node_x_normal, y=node_y_normal,
                     mode='markers',
                     hoverinfo='text',
-                    hovertext=node_text,
+                    hovertext=node_text_normal,
                     marker=dict(
-                        color=node_colors_final,  # Gold for focus node, skyblue for others
-                        size=node_sizes_final,  # Size based on score, larger for focus node
-                        opacity=1.0,  # Fully opaque, not transparent
+                        color=node_colors_normal,
+                        size=node_sizes_normal,
+                        opacity=1.0,
                         line=dict(width=2, color='black')
+                    )
+                )
+                
+                node_trace_focus = go.Scatter(
+                    x=node_x_focus, y=node_y_focus,
+                    mode='markers',
+                    hoverinfo='text',
+                    hovertext=node_text_focus,
+                    marker=dict(
+                        color=node_colors_focus,
+                        size=node_sizes_focus,
+                        opacity=1.0,
+                        line=dict(width=4, color='#FFD700')  # Gold border, thicker
+                    )
+                ) if node_x_focus else None
+                
+                # Create color legend using shapes and annotations for score ranges
+                legend_shapes = []
+                legend_annotations = []
+                
+                # Build legend showing score-to-color mapping
+                legend_y_start = 0.98
+                legend_x_start = 0.02
+                legend_x_color = legend_x_start  # X position for color bar
+                legend_x_text = legend_x_start + 0.025  # X position for text (after color bar)
+                legend_height = 0.25  # Height of color bar
+                legend_width = 0.015  # Width of color bar
+                num_legend_steps = 10  # Number of color steps in legend
+                
+                # Create gradient color bar
+                legend_y_bottom = legend_y_start - legend_height
+                step_height = legend_height / num_legend_steps
+                
+                for i in range(num_legend_steps):
+                    # Normalize step to [0, 1]
+                    step_val = i / (num_legend_steps - 1) if num_legend_steps > 1 else 0
+                    rgba = colormap(step_val)
+                    step_color = mcolors.rgb2hex(rgba)
+                    
+                    # Calculate score value for this step
+                    step_score = min_score + step_val * (max_score - min_score) if max_score > min_score else min_score
+                    
+                    # Create rectangle for this step
+                    y0 = legend_y_bottom + i * step_height
+                    y1 = legend_y_bottom + (i + 1) * step_height
+                    
+                    legend_shapes.append(
+                        dict(
+                            type="rect",
+                            xref="paper", yref="paper",
+                            x0=legend_x_color - legend_width/2,
+                            y0=y0,
+                            x1=legend_x_color + legend_width/2,
+                            y1=y1,
+                            fillcolor=step_color,
+                            line=dict(color="#000", width=0.5)
+                        )
+                    )
+                
+                # Add border around entire color bar
+                legend_shapes.append(
+                    dict(
+                        type="rect",
+                        xref="paper", yref="paper",
+                        x0=legend_x_color - legend_width/2,
+                        y0=legend_y_bottom,
+                        x1=legend_x_color + legend_width/2,
+                        y1=legend_y_start,
+                        fillcolor="rgba(0,0,0,0)",
+                        line=dict(color="#000", width=1.5)
+                    )
+                )
+                
+                # Helper function to format score in scientific notation
+                def format_scientific(score):
+                    """Format score as 'a.bc × 10^e' format"""
+                    if score == 0:
+                        return "0"
+                    # Use Python's scientific notation
+                    sci_str = f"{score:.2e}"
+                    # Parse it: e.g., "5.16e+08" -> "5.16" and "8"
+                    if 'e' in sci_str.lower():
+                        base, exp = sci_str.lower().split('e')
+                        # Remove + sign and convert to int then back to string to remove leading zeros
+                        exp_int = int(exp) if exp else 0
+                        # Format as "5.16 * 10^8"
+                        return f"{base} * 10^{exp_int}"
+                    return sci_str
+                
+                # Add min and max score labels
+                legend_annotations.append(
+                    dict(
+                        text=f"Max: {format_scientific(max_score)}",
+                        showarrow=False,
+                        xref="paper", yref="paper",
+                        x=legend_x_text, y=legend_y_start,
+                        xanchor="left", yanchor="top",
+                        font=dict(color="#000", size=11, family="Arial", weight="bold")
+                    )
+                )
+                legend_annotations.append(
+                    dict(
+                        text=f"Min: {format_scientific(min_score)}",
+                        showarrow=False,
+                        xref="paper", yref="paper",
+                        x=legend_x_text, y=legend_y_bottom,
+                        xanchor="left", yanchor="bottom",
+                        font=dict(color="#000", size=11, family="Arial", weight="bold")
+                    )
+                )
+                
+                # Add bottom annotation about color meaning
+                legend_annotations.append(
+                    dict(
+                        text="Node color represents score (darker = higher score)",
+                        showarrow=False,
+                        xref="paper", yref="paper",
+                        x=0.005, y=-0.002,
+                        xanchor="left", yanchor="bottom",
+                        font=dict(color="#888", size=12)
                     )
                 )
                 
@@ -515,8 +668,13 @@ class SYBMvpUserInterface:
                     else "SYB Network Graph (Rank & Score) - Full View"
                 )
                 
+                # Build data list with traces
+                figure_data = [edge_trace, node_trace_normal]
+                if node_trace_focus:
+                    figure_data.append(node_trace_focus)
+                
                 fig = go.Figure(
-                    data=[edge_trace, node_trace],
+                    data=figure_data,
                     layout=go.Layout(
                         title=dict(
                             text=title_text,
@@ -525,16 +683,8 @@ class SYBMvpUserInterface:
                         showlegend=False,
                         hovermode='closest',
                         margin=dict(b=20, l=5, r=5, t=40),
-                        annotations=[
-                            dict(
-                                text="Node size represents score (larger = higher score)",
-                                showarrow=False,
-                                xref="paper", yref="paper",
-                                x=0.005, y=-0.002,
-                                xanchor="left", yanchor="bottom",
-                                font=dict(color="#888", size=12)
-                            )
-                        ],
+                        annotations=legend_annotations,
+                        shapes=legend_shapes,
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         plot_bgcolor='white'
