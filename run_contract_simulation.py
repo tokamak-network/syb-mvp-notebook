@@ -298,25 +298,25 @@ if __name__ == "__main__":
         response_vouches=RESPONSE_VOUCHES_BASE
     )
 
-    # --- 3️⃣ Simulation 3: Dandelion (Chain) Attack ---
-    ATTACK_DANDELION = [
+    # --- 3️⃣ Simulation 3: chain (Chain) Attack ---
+    ATTACK_chain = [
         ("Sybil_1", "Sybil_2"),
         ("Sybil_2", "Sybil_3"),
         ("Sybil_3", "Eve")
     ]
     run_simulation(
-        simulation_name="Dandelion (Chain) Attack",
+        simulation_name="chain (Chain) Attack",
         num_real_users=NUM_REAL_USERS_BASE,
         num_sybil_users=NUM_SYBIL_USERS_BASE,
         seed_vouches=SEED_VOUCHES_BASE,
-        attack_vouches=ATTACK_DANDELION,
+        attack_vouches=ATTACK_chain,
         response_vouches=RESPONSE_VOUCHES_BASE
     )
     
     # --- 4️⃣ Simulation 4: N Real Users vs M Attackers (Star) ---
     
     # --- 🅱️ Define Adjustable Parameters for N vs M ---
-    N_REAL_USERS = 10
+    N_REAL_USERS = 15
     M_ATTACKERS = 8
     
     # --- Seed Vouches: Create a "trusted" ring/cycle ---
@@ -366,12 +366,12 @@ if __name__ == "__main__":
         response_vouches=response_vouches_nxm
     )
 
-    # --- 5️⃣ Simulation 5: N Real Users vs M Attackers (Dandelion) ---
+    # --- 5️⃣ Simulation 5: N Real Users vs M Attackers (Chain) ---
     
-    # --- Attack Vouches: M attackers in a DANDELION chain targeting User_1 ---
+    # --- Attack Vouches: M attackers in a chain targeting User_1 ---
     # (Sybil_1 -> Sybil_2 -> ... -> Sybil_M -> User_1)
     
-    attack_vouches_nxm_dandelion = []
+    attack_vouches_nxm_chain = []
     sybil_names_nxm = [f"Sybil_{i+1}" for i in range(M_ATTACKERS)]
     
     if M_ATTACKERS > 0:
@@ -379,20 +379,54 @@ if __name__ == "__main__":
         for i in range(M_ATTACKERS - 1):
             from_name = sybil_names_nxm[i]
             to_name = sybil_names_nxm[i+1]
-            attack_vouches_nxm_dandelion.append((from_name, to_name))
+            attack_vouches_nxm_chain.append((from_name, to_name))
         
         # The last sybil attacks the target user
         last_sybil = sybil_names_nxm[-1] # e.g., Sybil_M
         target_user = "User_1"
-        attack_vouches_nxm_dandelion.append((last_sybil, target_user))
+        attack_vouches_nxm_chain.append((last_sybil, target_user))
 
     # We re-use the same seed and response vouches from Simulation 4
+    run_simulation(
+        simulation_name=f"{N_REAL_USERS} Users vs {M_ATTACKERS} Attackers (chain)",
+        num_real_users=N_REAL_USERS,
+        num_sybil_users=M_ATTACKERS,
+        seed_vouches=seed_vouches_nxm, # Same trusted graph
+        attack_vouches=attack_vouches_nxm_chain,
+        response_vouches=response_vouches_nxm # Same community response
+    )
+
+# --- 6️⃣ Simulation 6: N Real Users vs M Attackers (Dandelion Attack) ---
+    
+    # --- Attack Vouches: M attackers in a Dandelion formation ---
+    # 1. "Stem": Sybil_1 attacks User_1
+    # 2. "Head": All M Sybils form a fully-connected, double-vouched clique.
+    
+    attack_vouches_dandelion = []
+    sybil_names_dandelion = [f"Sybil_{i+1}" for i in range(M_ATTACKERS)]
+    target_user = "User_1"
+
+    if M_ATTACKERS > 0:
+        # 1. The "Stem"
+        attack_vouches_dandelion.append((sybil_names_dandelion[0], target_user)) # (Sybil_1 -> User_1)
+        
+        # 2. The "Head" (Clique)
+        # Iterate over all unique pairs of attackers
+        for i in range(M_ATTACKERS):
+            for j in range(i + 1, M_ATTACKERS):
+                attacker_a = sybil_names_dandelion[i]
+                attacker_b = sybil_names_dandelion[j]
+                
+                # Add reciprocal vouches
+                attack_vouches_dandelion.append((attacker_a, attacker_b))
+                attack_vouches_dandelion.append((attacker_b, attacker_a))
+
+    # We re-use the same seed and response vouches from Simulation 4 & 5
     run_simulation(
         simulation_name=f"{N_REAL_USERS} Users vs {M_ATTACKERS} Attackers (Dandelion)",
         num_real_users=N_REAL_USERS,
         num_sybil_users=M_ATTACKERS,
         seed_vouches=seed_vouches_nxm, # Same trusted graph
-        attack_vouches=attack_vouches_nxm_dandelion,
+        attack_vouches=attack_vouches_dandelion,
         response_vouches=response_vouches_nxm # Same community response
     )
-
