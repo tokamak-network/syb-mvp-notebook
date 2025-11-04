@@ -451,7 +451,7 @@ class SYBMvpUserInterface:
                     else:
                         node_color_list.append('skyblue')
                 
-                # Prepare node sizes and colors final (needed for arrow positioning)
+                # Prepare node sizes and colors final
                 node_sizes_final = []
                 node_colors_final = []
                 for i, idx in enumerate(node_order):
@@ -462,92 +462,20 @@ class SYBMvpUserInterface:
                         node_sizes_final.append(node_sizes[i])
                         node_colors_final.append(node_color_list[i])
                 
-                # Prepare edge traces with arrows (directed graph)
+                # Prepare edge traces (simple lines, no arrows)
                 edge_x = []
                 edge_y = []
-                arrow_annotations_list = []
                 
                 # Ensure G is a DiGraph to get directed edges
                 if not isinstance(G, nx.DiGraph):
                     G = nx.DiGraph(G)
                 
-                # Calculate node radii for arrow positioning
-                # Convert marker size to approximate coordinate space radius
-                # Get the range of positions to estimate scale
-                all_positions = [pos[node] for node in G.nodes()]
-                if all_positions:
-                    x_coords = [p[0] for p in all_positions]
-                    y_coords = [p[1] for p in all_positions]
-                    coord_range = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
-                    coord_range = coord_range if coord_range > 0 else 1.0
-                    
-                    # Estimate radius: node size in pixels -> fraction of coordinate range
-                    node_radii = {}
-                    for i, idx in enumerate(node_order):
-                        size = node_sizes_final[i] if i < len(node_sizes_final) else 20
-                        # Convert size (15-40 range) to coordinate units
-                        # Rough estimate: 1% of coordinate range per 10 pixels of size
-                        node_radii[idx] = (size / 100.0) * (coord_range * 0.01)
-                else:
-                    node_radii = {idx: 0.02 for idx in node_order}
-                
+                # Draw simple edges connecting nodes
                 for edge in G.edges():
                     x0, y0 = pos[edge[0]]
                     x1, y1 = pos[edge[1]]
-                    
-                    # Calculate direction vector
-                    dx = x1 - x0
-                    dy = y1 - y0
-                    length = np.sqrt(dx**2 + dy**2)
-                    
-                    if length > 0:
-                        # Normalize direction
-                        dx_norm = dx / length
-                        dy_norm = dy / length
-                        
-                        # Get target node radius
-                        target_radius = node_radii.get(edge[1], 0.02)
-                        
-                        # Calculate arrow end point: stop at edge of target node
-                        # Move back from center by the node radius
-                        arrow_end_x = x1 - dx_norm * target_radius
-                        arrow_end_y = y1 - dy_norm * target_radius
-                        
-                        # Calculate arrow start point: slightly before the end
-                        arrow_start_offset = target_radius * 0.2  # Small gap before arrow
-                        arrow_start_x = arrow_end_x - dx_norm * arrow_start_offset
-                        arrow_start_y = arrow_end_y - dy_norm * arrow_start_offset
-                        
-                        # Draw the edge line (stop before target node)
-                        edge_end_x = arrow_end_x - dx_norm * target_radius * 0.5
-                        edge_end_y = arrow_end_y - dy_norm * target_radius * 0.5
-                        edge_x.extend([x0, edge_end_x, None])
-                        edge_y.extend([y0, edge_end_y, None])
-                        
-                        # Add arrow annotation pointing from source to target
-                        arrow_annotations_list.append(
-                            dict(
-                                ax=arrow_start_x,
-                                ay=arrow_start_y,
-                                x=arrow_end_x,
-                                y=arrow_end_y,
-                                xref="x",
-                                yref="y",
-                                axref="x",
-                                ayref="y",
-                                showarrow=True,
-                                arrowhead=2,
-                                arrowsize=1.0,
-                                arrowwidth=1.2,
-                                arrowcolor="#666",
-                                standoff=0,  # No standoff since we calculated it manually
-                                startstandoff=0
-                            )
-                        )
-                    else:
-                        # Zero length edge (shouldn't happen)
-                        edge_x.extend([x0, x1, None])
-                        edge_y.extend([y0, y1, None])
+                    edge_x.extend([x0, x1, None])
+                    edge_y.extend([y0, y1, None])
                 
                 edge_trace = go.Scatter(
                     x=edge_x, y=edge_y,
@@ -606,7 +534,7 @@ class SYBMvpUserInterface:
                                 xanchor="left", yanchor="bottom",
                                 font=dict(color="#888", size=12)
                             )
-                        ] + arrow_annotations_list,
+                        ],
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         plot_bgcolor='white'
@@ -643,9 +571,6 @@ class SYBMvpUserInterface:
                 #     node_size=node_sizes,
                 #     edge_color='gray',
                 #     width=2,
-                #     arrows=True,
-                #     arrowsize=20,
-                #     arrowstyle='->'
                 # )
                 # nx.draw_networkx_labels(
                 #     G,
