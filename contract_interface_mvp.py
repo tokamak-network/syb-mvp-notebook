@@ -91,7 +91,7 @@ class VouchMinimal:
         """Get rank for address, returning DEFAULT_RANK if rank is 0."""
         node = self.nodes.get(address)
         if not node:
-            return DEFAULT_RANK
+            return 0
         r = node.rank
         return DEFAULT_RANK if r == 0 else r
     
