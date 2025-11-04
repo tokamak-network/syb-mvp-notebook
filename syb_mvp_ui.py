@@ -2,7 +2,7 @@
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output
-from ContractInterfaceMvp import VouchMinimal, DEFAULT_RANK
+from contract_interface_mvp import VouchMinimal, DEFAULT_RANK
 from utils import generate_mul_eth_addresses
 import networkx as nx
 from comparison import plot_graph_with_scores
