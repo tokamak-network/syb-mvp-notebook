@@ -316,8 +316,8 @@ if __name__ == "__main__":
     # --- 4️⃣ Simulation 4: N Real Users vs M Attackers (Star) ---
     
     # --- 🅱️ Define Adjustable Parameters for N vs M ---
-    N_REAL_USERS = 15
-    M_ATTACKERS = 8
+    N_REAL_USERS = 10
+    M_ATTACKERS = 6
     
     # --- Seed Vouches: Create a "trusted" ring/cycle ---
     # (User_1 -> User_2 -> ... -> User_N -> User_1)
@@ -429,4 +429,145 @@ if __name__ == "__main__":
         seed_vouches=seed_vouches_nxm, # Same trusted graph
         attack_vouches=attack_vouches_dandelion,
         response_vouches=response_vouches_nxm # Same community response
+    )
+
+    # --- 7️⃣ Simulation 7: Mixed Attack (Malicious Seed 'Eve') ---
+    # Eve colludes with Sybils to boost Sybil_1
+    
+    ATTACK_MIXED_MALICIOUS = [
+        ("Eve", "Sybil_1"),      # Malicious seed vouches for target
+        ("Sybil_2", "Sybil_1"),    # Other sybils vouch for target
+        ("Sybil_3", "Sybil_1"),
+        ("Eve", "Sybil_2"),      # Malicious seed boosts other sybils
+        ("Sybil_2", "Sybil_3"),    # Sybils vouch internally
+        ("Sybil_3", "Eve")       # Sybil vouches back to malicious seed
+    ]
+    
+    run_simulation(
+        simulation_name="Mixed Attack (Malicious Eve)",
+        num_real_users=NUM_REAL_USERS_BASE,
+        num_sybil_users=NUM_SYBIL_USERS_BASE,
+        seed_vouches=SEED_VOUCHES_BASE,
+        attack_vouches=ATTACK_MIXED_MALICIOUS,
+        response_vouches=RESPONSE_VOUCHES_BASE
+    )
+
+    # --- 8️⃣ Simulation 8: Star Attack (Malicious Seed 'Eve') ---
+    # Eve and Sybils form a star, all vouching for Sybil_1
+    
+    ATTACK_STAR_MALICIOUS = [
+        ("Eve", "Sybil_1"),      # Malicious seed
+        ("Sybil_2", "Sybil_1"),    # Sybils
+        ("Sybil_3", "Sybil_1")
+    ]
+    
+    run_simulation(
+        simulation_name="Star Attack (Malicious Eve)",
+        num_real_users=NUM_REAL_USERS_BASE,
+        num_sybil_users=NUM_SYBIL_USERS_BASE,
+        seed_vouches=SEED_VOUCHES_BASE,
+        attack_vouches=ATTACK_STAR_MALICIOUS,
+        response_vouches=RESPONSE_VOUCHES_BASE
+    )
+
+    # --- 9️⃣ Simulation 9: Chain (Chain) Attack (Malicious Seed 'Eve') ---
+    # Eve starts a vouch chain to boost Sybil_1
+    
+    ATTACK_CHAIN_MALICIOUS = [
+        ("Eve", "Sybil_2"),
+        ("Sybil_2", "Sybil_3"),
+        ("Sybil_3", "Sybil_1")   # Chain ends by vouching for target
+    ]
+    
+    run_simulation(
+        simulation_name="Chain Attack (Malicious Eve)",
+        num_real_users=NUM_REAL_USERS_BASE,
+        num_sybil_users=NUM_SYBIL_USERS_BASE,
+        seed_vouches=SEED_VOUCHES_BASE,
+        attack_vouches=ATTACK_CHAIN_MALICIOUS,
+        response_vouches=RESPONSE_VOUCHES_BASE
+    )
+
+    # --- 10️⃣ Simulation 10: N vs M Star Attack (Malicious Seed 'User_N') ---
+    
+    # --- Attack Vouches: Star formation targeting Sybil_1 ---
+    # Malicious 'User_N' and all other sybils vouch for Sybil_1
+    
+    attack_vouches_nxm_star_malicious = []
+    sybil_names_nxm = [f"Sybil_{i+1}" for i in range(M_ATTACKERS)]
+    malicious_seed_name = f"User_{N_REAL_USERS}" # e.g., User_20
+    attack_target_name = "Sybil_1"
+
+    if M_ATTACKERS > 0 and N_REAL_USERS > 0:
+        # 1. Malicious seed vouches for the target
+        attack_vouches_nxm_star_malicious.append((malicious_seed_name, attack_target_name))
+        
+        # 2. All *other* sybils (Sybil_2...Sybil_M) vouch for the target
+        for i in range(1, M_ATTACKERS): # Start from index 1 (Sybil_2)
+            attacker_name = sybil_names_nxm[i]
+            attack_vouches_nxm_star_malicious.append((attacker_name, attack_target_name))
+
+    run_simulation(
+        simulation_name=f"{N_REAL_USERS} vs {M_ATTACKERS} Star (Malicious User_{N_REAL_USERS})",
+        num_real_users=N_REAL_USERS,
+        num_sybil_users=M_ATTACKERS,
+        seed_vouches=seed_vouches_nxm,
+        attack_vouches=attack_vouches_nxm_star_malicious,
+        response_vouches=response_vouches_nxm 
+    )
+
+    # --- 11️⃣ Simulation 11: N vs M Chain Attack (Malicious Seed 'User_N') ---
+
+    # --- Attack Vouches: Chain starting from User_N ---
+    # (User_N -> Sybil_M -> ... -> Sybil_2 -> Sybil_1)
+    
+    attack_vouches_nxm_chain_malicious = []
+    
+    if M_ATTACKERS > 0 and N_REAL_USERS > 0:
+        # 1. Malicious seed starts the chain
+        attack_vouches_nxm_chain_malicious.append((malicious_seed_name, sybil_names_nxm[-1])) # User_N -> Sybil_M
+        
+        # 2. Internal Sybil chain
+        # (Sybil_M -> Sybil_M-1) ... (Sybil_2 -> Sybil_1)
+        for i in range(M_ATTACKERS - 1, 0, -1): # Iterate from M-1 down to 1
+            from_name = sybil_names_nxm[i]   # e.g., Sybil_M
+            to_name = sybil_names_nxm[i-1] # e.g., Sybil_M-1
+            attack_vouches_nxm_chain_malicious.append((from_name, to_name))
+
+    run_simulation(
+        simulation_name=f"{N_REAL_USERS} vs {M_ATTACKERS} Chain (Malicious User_{N_REAL_USERS})",
+        num_real_users=N_REAL_USERS,
+        num_sybil_users=M_ATTACKERS,
+        seed_vouches=seed_vouches_nxm,
+        attack_vouches=attack_vouches_nxm_chain_malicious,
+        response_vouches=response_vouches_nxm 
+    )
+
+    # --- 12️⃣ Simulation 12: N vs M Dandelion Attack (Malicious Seed 'User_N') ---
+    
+    # --- Attack Vouches: Dandelion formation ---
+    # 1. "Stem": Malicious User_N vouches for Sybil_1
+    # 2. "Head": All M Sybils form a fully-connected, double-vouched clique.
+    
+    attack_vouches_nxm_dandelion_malicious = []
+
+    if M_ATTACKERS > 0 and N_REAL_USERS > 0:
+        # 1. The "Stem" from the trusted graph
+        attack_vouches_nxm_dandelion_malicious.append((malicious_seed_name, attack_target_name)) # (User_N -> Sybil_1)
+        
+        # 2. The "Head" (Clique)
+        for i in range(M_ATTACKERS):
+            for j in range(i + 1, M_ATTACKERS):
+                attacker_a = sybil_names_nxm[i]
+                attacker_b = sybil_names_nxm[j]
+                attack_vouches_nxm_dandelion_malicious.append((attacker_a, attacker_b))
+                attack_vouches_nxm_dandelion_malicious.append((attacker_b, attacker_a))
+
+    run_simulation(
+        simulation_name=f"{N_REAL_USERS} vs {M_ATTACKERS} Dandelion (Malicious User_{N_REAL_USERS})",
+        num_real_users=N_REAL_USERS,
+        num_sybil_users=M_ATTACKERS,
+        seed_vouches=seed_vouches_nxm,
+        attack_vouches=attack_vouches_nxm_dandelion_malicious,
+        response_vouches=response_vouches_nxm 
     )
