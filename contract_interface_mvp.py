@@ -8,18 +8,18 @@ from utils import generate_mul_eth_addresses
 # Constants matching Solidity contract
 DEFAULT_RANK = 10**24  # rank if no IN neighbors
 R = 64  # weight window: c_r = 2^(R - r) for r<=R
-BONUS_OUT = 2**59  # tiny per-outedge bonus
+BONUS_OUT = 2**59  # per-edge outdegree bonus
 BONUS_CAP = 15  # cap for outdegree bonus
 
 
 @dataclass
 class Node:
     """Node state matching the Solidity contract."""
-    rank: int = 0  # 0 means DEFAULT_RANK
+    rank: int = 0  # 0 means not-initialized -> set to DEFAULT_RANK once initialized
     score: int = 0
     outdegree: int = 0
     in_neighbors: List[str] = field(default_factory=list)
-    previous_rank: int = 0  # Previous rank value (0 means no previous or DEFAULT_RANK)
+    previous_rank: int = 0  # Previous rank value (0 means no previous value)
     previous_score: int = 0  # Previous score value
 
 
@@ -138,7 +138,7 @@ class VouchMinimal:
                 m += 1
         
         rv = 3 * k + 1 - m
-        if rv == 0:
+        if rv <= 0:
             rv = 1
         
         node.rank = rv
