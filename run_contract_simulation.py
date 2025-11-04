@@ -1,4 +1,4 @@
-# mvrun_contract_simulation.py
+# run_contract_simulation.py
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -6,10 +6,13 @@ import os
 import networkx as nx
 from contract_interface_mvp import VouchMinimal
 from utils import generate_mul_eth_addresses
+from plot_graphs import plot_graph_evolution_with_scores # <-- Import new function
 
 # --- History Tracking & Plotting ---
 
 history = []
+graphs_history = []  # <-- Add list to track graph states
+scores_history = []  # <-- Add list to track scores by node index
 event_counter = 0
 all_user_names = set()
 
@@ -17,17 +20,35 @@ def record_step(vm: VouchMinimal, user_map: dict, event_name: str):
     """Records the current state of scores for plotting."""
     global event_counter
     global history
+    global graphs_history
+    global scores_history
     
     event_counter += 1
     record = {}
     record['event_step'] = event_counter
     record['event_name'] = event_name
     
-    # Get score for all known users
+    # Get score for all known users (for line plot)
     for name, address in user_map.items():
         record[name] = vm.get_score(address)
         
     history.append(record)
+    
+    # --- Add logic for graph evolution plot ---
+    # Store a *copy* of the current graph
+    graphs_history.append(vm.network.copy())
+    
+    # Store scores mapped to graph node *indices*
+    current_scores_dict = {}
+    for node_idx in vm.network.nodes():
+        address = vm.idx_to_address.get(node_idx)
+        if address:
+            current_scores_dict[node_idx] = vm.get_score(address)
+        else:
+            current_scores_dict[node_idx] = 0.0
+    scores_history.append(current_scores_dict)
+    # --- End new logic ---
+
     
     # Print current ranks and scores
     print(f"\n--- Event: {event_name} (Step {event_counter}) ---")
@@ -102,11 +123,6 @@ def run_simulation():
     print("--- Starting VouchMinimal Simulation ---")
 
     # --- 1. Initialization ---
-    # We must start with an empty graph for VouchMinimal
-    #
-    # Note: Your VouchMinimal class adds nodes to the graph as
-    # they appear in vouches.
-    
     g = nx.DiGraph()
     vm = VouchMinimal(g)
 
@@ -117,11 +133,14 @@ def run_simulation():
     
     addresses = generate_mul_eth_addresses(len(all_names))
     user_map = dict(zip(all_names, addresses))
+    
+    # Map names to node indices for the graph plot
+    # Note: Indices are created *dynamically* by VouchMinimal
+    # We will rely on vm.idx_to_address in record_step
 
     record_step(vm, user_map, "Initialization")
     
     # --- 2. Vouching Test (Seed Vouches) ---
-    # The first 5 vouches are "seed" vouches
     print("\n--- Phase 2: Seed Vouches ---")
     vm.vouch(user_map["Alice"], user_map["Bob"])
     record_step(vm, user_map, "Vouch: A -> B")
@@ -182,8 +201,18 @@ def run_simulation():
     record_step(vm, user_map, "Vouch: A -> D")
     
     # --- 7. Plotting ---
-    print("\n--- Phase 7: Generating Plot ---")
+    print("\n--- Phase 7: Generating Score Line Plot ---")
     plot_history("contract_simulation_evolution.png")
+    
+    # --- 8. Plot Graph Evolution ---
+    print("\n--- Phase 8: Generating Graph Evolution Plot ---")
+    plot_graph_evolution_with_scores(
+        graphs_history,
+        scores_history,
+        "VouchMinimal Simulation Graph Evolution",
+        layout_type="spring",
+        filename="contract_graph_evolution.png"
+    )
     
     print("\n--- Simulation Complete ---")
 
