@@ -5,12 +5,16 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 import math
-import os  # <-- Import os
+import os
 
-def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_type="circular", filename=None): # <-- Add filename
+def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_type="circular", filename=None):
     """
     Plots a sequence of graphs with fixed node positions and captions,
     displaying node labels and scores, with each graph inside a box.
+    
+    Styling is updated to match the "notebook" style:
+    - 'skyblue' nodes
+    - Node size is proportional to score
     """
     if not graphs:
         print(f"No graphs to plot for {title_prefix}.")
@@ -56,11 +60,53 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
     for i, G in enumerate(graphs):
         ax = axes[i]
         
-        # Get scores for the current step
-        current_scores = scores_list[i] if i < len(scores_list) else {}
+        # Get nodes *actually in this graph*
+        nodes_in_g = sorted(list(G.nodes()))
         
-        # Create a dictionary for node labels showing ID and score
-        labels = {node: f"{node}: {current_scores.get(node, 0.0):.2f}" for node in G.nodes()}
+        # Get scores for the current step
+        current_scores_dict = scores_list[i] if i < len(scores_list) else {}
+        
+        # --- Start: Styling Logic (like notebook) ---
+        
+        # 1. Get scores for current nodes
+        scores_for_nodes = [current_scores_dict.get(node, 0.0) for node in nodes_in_g]
+
+        # 2. Create Labels (Node: Score)
+        labels = {}
+        for node in nodes_in_g:
+            score = current_scores_dict.get(node, 0.0)
+            # Format large scores scientifically to avoid overlap
+            if score > 1_000_000:
+                labels[node] = f"{node}: {score:.2e}"
+            else:
+                labels[node] = f"{node}: {score:,.0f}"
+
+        # 3. Calculate Node Sizes based on scores
+        node_sizes = []
+        min_size = 300
+        max_size = 1500
+        
+        if scores_for_nodes and max(scores_for_nodes) > 0:
+            min_s = min(scores_for_nodes)
+            max_s = max(scores_for_nodes)
+            
+            if max_s > min_s:
+                for score in scores_for_nodes:
+                    # Normalize score (0 to 1)
+                    normalized = (score - min_s) / (max_s - min_s)
+                    # Map to size range
+                    node_sizes.append(min_size + normalized * (max_size - min_size))
+            else:
+                # All nodes have same score
+                node_sizes = [min_size + 0.5 * (max_size - min_size)] * len(nodes_in_g)
+        else:
+            # All nodes have 0 score
+            node_sizes = [min_size] * len(nodes_in_g)
+
+        # 4. Set Node Color
+        node_colors = 'skyblue'
+        
+        # --- End: Styling Logic ---
         
         # Get caption for the evolution
         caption = ""
@@ -90,15 +136,14 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
                     caption = "No change"
         
         # Draw the graph with fixed layout, node labels, and a single edge color
-        # Ensure we only draw nodes/edges present in the current graph G
         nx.draw(
             G, pos, ax=ax, 
             with_labels=False, 
-            node_color='lightgreen', 
-            node_size=500, 
+            node_color=node_colors,  # <-- Use new style
+            node_size=node_sizes,    # <-- Use new style
             edge_color='gray',
-            nodelist=list(G.nodes()), # Only draw nodes in G
-            edgelist=list(G.edges())  # Only draw edges in G
+            nodelist=nodes_in_g,     # <-- IMPORTANT: ensure order
+            edgelist=list(G.edges()) # Only draw edges in G
         )
         nx.draw_networkx_labels(G, pos, labels=labels, ax=ax, font_size=8)
         
@@ -145,5 +190,6 @@ def display_graph_state(graph, scores, title):
     for node in sorted(graph.nodes()):
         score = scores.get(node, 0.0) # Use .get() for safety
         neighbors = sorted(list(graph.neighbors(node)))
-        print(f"Node {node:<2} | Score: {score:<7.4f} | Neighbors: {neighbors}")
+        # Use .2e for score to match plotting
+        print(f"Node {node:<2} | Score: {score:<10.2e} | Neighbors: {neighbors}")
     print("-" * (len(title) + 6))
