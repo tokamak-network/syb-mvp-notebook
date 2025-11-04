@@ -207,15 +207,14 @@ class TransactionSimulator:
                 ]
                 if possible_targets:
                     target = random.choice(possible_targets)
-                    # Check if already vouched
-                    vouches = self.contract.vouches.get(user_addr, {})
-                    if not vouches.get(target, False):
+                    # Check if already vouched using the VouchMinimal instance
+                    if not self.contract.network.vm.has_vouch(user_addr, target):
                         user_interface.vouch(target)
 
             elif txn_type == 'unvouch':
                 # Unvouch a random existing vouch
-                vouches = self.contract.vouches.get(user_addr, {})
-                active_vouches = [addr for addr, is_vouched in vouches.items() if is_vouched]
+                # Get vouches from the VouchMinimal instance
+                active_vouches = self.contract.network.vm.get_out_neighbors(user_addr)
                 if active_vouches:
                     target = random.choice(active_vouches)
                     user_interface.unvouch(target)
@@ -274,3 +273,4 @@ class TransactionSimulator:
         self.running = False
         if self.thread:
             self.thread.join(timeout=2.0)
+

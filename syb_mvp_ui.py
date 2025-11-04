@@ -2,10 +2,9 @@
 
 import ipywidgets as widgets
 from IPython.display import display, clear_output
-from contract_interface_mvp import VouchMinimal, DEFAULT_RANK
-from utils import generate_mul_eth_addresses
+from contract_interface_mvp import VouchMinimal, DEFAULT_RANK, generate_mul_eth_addresses
 import networkx as nx
-from comparison import plot_graph_with_scores
+from plot_utils import plot_graph_with_scores
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import numpy as np

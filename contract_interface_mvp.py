@@ -1,11 +1,22 @@
 """MVP Contract Interface - Python implementation of VouchMinimal Solidity contract"""
 
+import random
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import networkx as nx
-from utils import generate_mul_eth_addresses
+# Removed: from utils import generate_mul_eth_addresses
 
-# Constants matching Solidity contract
+# --- Address Generation Functions (Moved from utils.py) ---
+
+def generate_random_eth_address():
+    """Generates a fake random ethereum address."""
+    return f"0x{random.randint(0, 0xffffffffffffffffffffffffffffffffffffffff):040x}"
+
+def generate_mul_eth_addresses(n):
+    """Generates a list of n fake random ethereum addresses."""
+    return [generate_random_eth_address() for _ in range(n)]
+
+# --- Constants matching Solidity contract ---
 DEFAULT_RANK = 10**24  # rank if no IN neighbors
 R = 64  # weight window: c_r = 2^(R - r) for r<=R
 BONUS_OUT = 2**59  # per-edge outdegree bonus
@@ -67,14 +78,28 @@ class VouchMinimal:
         for node_idx, address in node_to_address.items():
             self.address_to_idx[address] = node_idx
             self.idx_to_address[node_idx] = address
+            # Ensure a Node object is created for existing nodes
+            if address not in self.nodes:
+                self.nodes[address] = Node()
             self._next_idx = max(self._next_idx, node_idx + 1)
         
         # Create vouches for each edge - vouch() handles the rest
-        for from_node, to_node in network.edges():
+        # Make a copy of edges to iterate over as self.vouch modifies the graph
+        edges_to_process = list(network.edges())
+        for from_node, to_node in edges_to_process:
             from_address = node_to_address.get(from_node)
             to_address = node_to_address.get(to_node)
             if from_address and to_address:
-                self.vouch(from_address, to_address)
+                # Need to manually remove the edge from the graph first
+                # because self.vouch() will add it back.
+                # This ensures correct state initialization.
+                if self.network.has_edge(from_node, to_node):
+                    self.network.remove_edge(from_node, to_node)
+                try:
+                    self.vouch(from_address, to_address)
+                except ValueError as e:
+                    # e.g., "exists" error if logic is not perfect, just log
+                    print(f"Warning during init: {e}")
         
     
     def _get_or_create_idx(self, address: str) -> int:
@@ -210,7 +235,8 @@ class VouchMinimal:
         # Update NetworkX graph
         from_idx = self._get_or_create_idx(from_address)
         to_idx = self._get_or_create_idx(to_address)
-        self.network.add_edge(from_idx, to_idx)
+        if not self.network.has_edge(from_idx, to_idx):
+            self.network.add_edge(from_idx, to_idx)
         
         # Bootstrap logic: first 5 vouches (0-4) seed endpoints to rank=1
         if self.seed_vouch_count < 5:

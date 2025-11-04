@@ -47,21 +47,22 @@ class SYBContract:
 
     Simulates a blockchain contract that implements sybil resistance through social
     vouching and algorithmic reputation scoring. Users can deposit/withdraw funds,
-    vouch/unvouch for other users, and the system calculates reputation scores.
+    vouch/unvouch for other users, and the system calculates reputation scores
+    using the integrated VouchMinimal algorithm in the Network class.
     """
 
-    def __init__(self, scoring_algorithm: str = 'pagerank'):
-        """Initialize the SYB contract with specified scoring algorithm."""
+    def __init__(self):
+        """Initialize the SYB contract."""
         self.batch_size = 5
         self.last_idx = 0
         self.last_forged_batch = 0
         self.account_info: Dict[str, AccountInfo] = {}
-        self.vouches: Dict[str, Dict[str, bool]] = {}
+        # self.vouches is removed; trust is now managed by self.network.vm
         self.score_snapshots: Dict[str, ScoreSnapshot] = {}
         self.unprocessed_txns: List[Transaction] = []
         self.batches: Dict[int, BatchResult] = {}  # Store batch history
-        self.network = Network()
-        self.scoring_algorithm = scoring_algorithm
+        self.network = Network() # Uses VouchMinimal by default
+        # self.scoring_algorithm is removed; VouchMinimal is standard
         self.address_to_idx: Dict[str, int] = {}
         self.idx_to_address: Dict[int, str] = {}
 
@@ -71,7 +72,8 @@ class SYBContract:
             idx = self.last_idx
             self.address_to_idx[address] = idx
             self.idx_to_address[idx] = address
-            self.network.add_node(idx, balance=0.0)
+            # network.add_node also creates the node in VouchMinimal
+            self.network.add_node(idx, balance=0.0) 
             self.account_info[address] = AccountInfo(balance=0, idx=idx)
             self.last_idx += 1
             return idx
@@ -135,27 +137,15 @@ class SYBContract:
             self.network.set_balance(txn.from_idx, balance_in_eth)
 
         elif txn.identifier == TXN_VOUCH and to_addr:
-            # Create bidirectional trust relationship
-            self._ensure_vouch_relationship_exists(from_addr, to_addr)
-            self.vouches[from_addr][to_addr] = True
-            self.vouches[to_addr][from_addr] = True
+            # network.add_edge now handles the VouchMinimal vouch and score update
             self.network.add_edge(txn.from_idx, txn.to_idx)
 
         elif txn.identifier == TXN_UNVOUCH and to_addr:
-            # Remove trust relationship
-            if from_addr in self.vouches:
-                self.vouches[from_addr][to_addr] = False
-            if to_addr in self.vouches:
-                self.vouches[to_addr][from_addr] = False
+            # network.remove_edge now handles the VouchMinimal unvouch and score update
             if self.network.graph.has_edge(txn.from_idx, txn.to_idx):
                 self.network.remove_edge(txn.from_idx, txn.to_idx)
 
-    def _ensure_vouch_relationship_exists(self, addr1: str, addr2: str):
-        """Ensure vouch dictionaries exist for both addresses."""
-        if addr1 not in self.vouches:
-            self.vouches[addr1] = {}
-        if addr2 not in self.vouches:
-            self.vouches[addr2] = {}
+    # _ensure_vouch_relationship_exists is removed as self.vouches is removed
 
     def forge_batch(self) -> Optional[BatchResult]:
         """Process a batch of pending transactions and update reputation scores."""
@@ -168,18 +158,24 @@ class SYBContract:
         self.unprocessed_txns = self.unprocessed_txns[self.batch_size:]
 
         # Process each transaction in the batch
+        # Scores are now updated *during* processing by add_edge/remove_edge
         for transaction in batch_transactions:
             self._process_transaction(transaction)
 
-        # Update batch counter and compute new scores
+        # Update batch counter
         self.last_forged_batch += 1
-        new_scores = self.network.compute_score(self.scoring_algorithm)
+        
+        # Get the *current* scores from the network
+        # No algorithm name needed, as VouchMinimal is the default
+        new_scores = self.network.compute_score()
 
         # Store score snapshots for each user
         for node_index, node_id in enumerate(self.network._node_order):
             user_address = self.idx_to_address.get(node_id)
             if user_address and node_index < len(new_scores):
-                scaled_score = int(new_scores[node_index] * 2**32)
+                # Score is already a float, but VouchMinimal returns large ints.
+                # Let's use the raw score.
+                scaled_score = int(new_scores[node_index])
                 self.score_snapshots[user_address] = ScoreSnapshot(scaled_score, self.last_forged_batch)
 
         # Create and store batch result
@@ -199,6 +195,7 @@ class SYBContract:
     def get_pending_transactions(self) -> List[Transaction]:
         """Get the list of unprocessed transactions."""
         return self.unprocessed_txns
+
 
 class SYBUser:
     """User interface for interacting with the SYB contract."""
@@ -232,4 +229,5 @@ class SYBUser:
     def get_my_score(self) -> float:
         """Get this user's current reputation score."""
         score_snapshot = self.contract.get_score_snapshot(self.user_address)
-        return score_snapshot.score / 2**32 if score_snapshot else 0.0
+        # The score is stored as a large int, just return it.
+        return float(score_snapshot.score) if score_snapshot else 0.0

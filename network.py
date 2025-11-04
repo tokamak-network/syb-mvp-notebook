@@ -1,56 +1,47 @@
 """
-Network class for graph operations with balance tracking and scoring algorithms.
+Network class for graph operations with balance tracking and VouchMinimal scoring.
 
-This class manages a graph with node balances and provides various scoring algorithms.
+This class manages a directed graph with node balances and uses the 
+VouchMinimal algorithm to compute node ranks and scores automatically.
 """
 
 import networkx as nx
 import numpy as np
 from typing import Dict, List, Optional, Union
 from scipy.sparse import csr_matrix
-from comparison import generate_random_graph, plot_graph_with_scores
+from plot_utils import generate_random_graph, plot_graph_with_scores
 
-# Import the four scoring functions
-from initial_scores import compute_initial_scores
-from random_walk_scoring_algorithm import (
-    compute_next_scores as compute_random_walk,
-)
-from pagerank_scoring_algorithm import (
-    compute_next_scores as compute_pagerank
-)
-from equal_split_scoring_algorithm import (
-    compute_next_scores as compute_equal_split
-)
-from argmax_scoring_algorithm import (
-    compute_next_scores as compute_argmax
-)
+# Import the VouchMinimal class and Node dataclass
+from contract_interface_mvp import VouchMinimal, Node, generate_mul_eth_addresses
 
 
 class Network:
     """
-    A network class that manages a graph with node balances and scoring algorithms.
+    A network class that manages a directed graph with node balances and
+    integrates the VouchMinimal scoring algorithm.
     
     The graph represents the network structure, and balance_list tracks the balance
-    of each node. Various scoring algorithms can be applied to compute node scores.
+    of each node. Scores are computed by the VouchMinimal instance on
+    vouch/unvouch operations (add_edge/remove_edge).
     """
     
-    def __init__(self, graph: Optional[nx.Graph] = None, balance_list: Optional[List[float]] = None):
+    def __init__(self, graph: Optional[nx.DiGraph] = None, balance_list: Optional[List[float]] = None):
         """
         Initialize the network.
         
         Args:
-            graph: NetworkX graph (optional)
+            graph: NetworkX DiGraph (optional). If provided, VouchMinimal will
+                   be initialized with this graph, and all existing edges
+                   will be processed as vouches.
             balance_list: List of balances for each node (optional)
         """
-        self.graph = graph or nx.Graph()
+        self.graph = graph or nx.DiGraph()
         self.balance_list = balance_list or []
-        self.config = {
-            'SIGMA_EQUAL_SPLIT': 2.0,
-            'SIGMA_ARGMAX': 2.0,
-            'SIGMA_PAGERANK': 2.0,
-            'ALPHA_PAGERANK': 0.15,
-            'MAX_PR_ITERATIONS': 100,
-        }
+        
+        # Initialize VouchMinimal with the graph.
+        # self.vm.network is an alias for self.graph
+        self.vm = VouchMinimal(self.graph) 
+        
         self._node_order = []
         self._update_node_order()
         self._ensure_balance_consistency()
@@ -58,14 +49,14 @@ class Network:
     @classmethod
     def from_matrix(cls, matrix: Union[np.ndarray, csr_matrix], 
                    balance_list: Optional[List[float]] = None,
-                   create_using: type = nx.Graph) -> 'Network':
+                   create_using: type = nx.DiGraph) -> 'Network':
         """
         Create network from adjacency matrix.
         
         Args:
             matrix: Adjacency matrix
             balance_list: List of balances for each node (optional)
-            create_using: Graph class to create
+            create_using: Graph class to create (should be nx.DiGraph or compatible)
             
         Returns:
             Network instance
@@ -74,6 +65,9 @@ class Network:
             matrix = matrix.toarray()
         
         graph = nx.from_numpy_array(matrix, create_using=create_using)
+        if not isinstance(graph, nx.DiGraph):
+            graph = nx.DiGraph(graph) # Ensure graph is directed
+            
         return cls(graph, balance_list)
     
     @classmethod
@@ -91,14 +85,19 @@ class Network:
         """
         balance_list = np.random.uniform(balance_range[0], balance_range[1], n_nodes).tolist()
         if random_name == 'erdos_renyi':
-            graph = nx.erdos_renyi_graph(n_nodes, 0.5)
+            # Ensure a directed graph is created
+            graph = nx.erdos_renyi_graph(n_nodes, 0.5, directed=True)
         elif random_name == 'barabasi_albert':
-            graph = nx.barabasi_albert_graph(n_nodes, 1)
+            # Use scale_free_graph for a directed equivalent
+            graph = nx.scale_free_graph(n_nodes)
         elif random_name == 'watts_strogatz':
-            graph = nx.watts_strogatz_graph(n_nodes, 1, 0.5)
+            # Create undirected and convert to directed
+            graph = nx.watts_strogatz_graph(n_nodes, 4, 0.1)
+            graph = nx.DiGraph(graph)
         elif random_name == '':
             m = np.random.randint(0, n_nodes * (n_nodes - 1) // 2)
-            graph = generate_random_graph(n_nodes, m)
+            graph = generate_random_graph(n_nodes, m) # Assumes plot_utils returns undirected
+            graph = nx.DiGraph(graph) # Convert to directed
         else:
             raise ValueError(f"Unknown random graph name: {random_name}")
             
@@ -122,8 +121,8 @@ class Network:
         """Convert graph to matrix representation."""
         return nx.to_numpy_array(self.graph, nodelist=self._node_order)
     
-    def get_graph(self) -> nx.Graph:
-        """Get the underlying NetworkX graph."""
+    def get_graph(self) -> nx.DiGraph:
+        """Get the underlying NetworkX DiGraph."""
         return self.graph
     
     def get_info(self) -> Dict[str, Union[List, int, float]]:
@@ -137,24 +136,79 @@ class Network:
             'balance_list': self.balance_list.copy(),
             'total_balance': sum(self.balance_list),
             'avg_balance': np.mean(self.balance_list) if self.balance_list else 0.0,
-            'degrees': [self.graph.degree(node) for node in self._node_order],
-            'is_connected': nx.is_connected(self.graph) if self.graph.number_of_nodes() > 0 else False
+            'in_degrees': [self.graph.in_degree(node) for node in self._node_order],
+            'out_degrees': [self.graph.out_degree(node) for node in self._node_order],
+            'is_strongly_connected': nx.is_strongly_connected(self.graph) if self.graph.number_of_nodes() > 0 else False
         }
     
     def add_edge(self, u: int, v: int, **attr) -> None:
-        """Add an edge to the graph."""
-        self.graph.add_edge(u, v, **attr)
+        """
+        Add a directed edge (u -> v) to the graph and trigger vm.vouch().
+        
+        Args:
+            u: From node (integer ID)
+            v: To node (integer ID)
+            **attr: Additional edge attributes
+        """
+        from_address = self.vm.idx_to_address.get(u)
+        to_address = self.vm.idx_to_address.get(v)
+
+        # Ensure nodes and their addresses exist before vouching
+        if from_address is None:
+            self.add_node(u) # This will create the node and its address
+            from_address = self.vm.idx_to_address[u]
+        if to_address is None:
+            self.add_node(v) # This will create the node and its address
+            to_address = self.vm.idx_to_address[v]
+
+        try:
+            # VouchMinimal handles adding the edge to self.graph
+            self.vm.vouch(from_address, to_address)
+            
+            # Add attributes to the edge if vouch was successful
+            if self.graph.has_edge(u, v) and attr:
+                 nx.set_edge_attributes(self.graph, {(u, v): attr})
+                 
+        except ValueError as e:
+            print(f"Vouch failed for {u} -> {v}: {e}")
+        
         self._update_node_order()
         self._ensure_balance_consistency()
     
     def remove_edge(self, u: int, v: int) -> None:
-        """Remove an edge from the graph."""
+        """
+        Remove a directed edge (u -> v) from the graph and trigger vm.unvouch().
+        
+        Args:
+            u: From node (integer ID)
+            v: To node (integer ID)
+        """
         if self.graph.has_edge(u, v):
-            self.graph.remove_edge(u, v)
+            from_address = self.vm.idx_to_address.get(u)
+            to_address = self.vm.idx_to_address.get(v)
+
+            if from_address and to_address:
+                try:
+                    # VouchMinimal handles removing the edge from self.graph
+                    self.vm.unvouch(from_address, to_address)
+                except ValueError as e:
+                    print(f"Unvouch failed for {u} -> {v}: {e}")
+            
             self._update_node_order()
     
     def add_node(self, node: Optional[int] = None, balance: float = 0.0, **attr) -> int:
-        """Add a node to the graph. If node is None, automatically assign the next available ID."""
+        """
+        Add a node to the graph. If node is None, automatically assign the next available ID.
+        This also creates a corresponding mock ETH address for VouchMinimal.
+        
+        Args:
+            node: Integer node ID (optional)
+            balance: Initial balance for the node
+            **attr: Additional node attributes
+            
+        Returns:
+            The integer node ID
+        """
         if node is None:
             node = max(self._node_order) + 1 if self._node_order else 0
         
@@ -163,7 +217,17 @@ class Network:
             self._update_node_order()
             insertion_idx = self._node_order.index(node)
             self.balance_list.insert(insertion_idx, balance)
+            
+            # --- VouchMinimal Integration ---
+            # Create address and state for the new node
+            if node not in self.vm.idx_to_address:
+                new_address = generate_mul_eth_addresses(1)[0]
+                self.vm.idx_to_address[node] = new_address
+                self.vm.address_to_idx[new_address] = node
+                self.vm.nodes[new_address] = Node() # Create new Node state
+            # --- End Integration ---
         else:
+            # Node already exists, just update balance
             idx = self._node_order.index(node)
             self.balance_list[idx] = balance
 
@@ -171,63 +235,84 @@ class Network:
         return node
     
     def remove_node(self, node: int) -> None:
-        """Remove a node from the graph."""
+        """
+        Remove a node and all its associated vouches (in and out) from the graph.
+        
+        Args:
+            node: Integer node ID
+        """
         if node in self.graph:
+            address = self.vm.idx_to_address.get(node)
+            
+            # Unvouch all incoming edges
+            # Must copy list as self.remove_edge modifies the graph
+            in_edges = list(self.graph.in_edges(node))
+            for u, v in in_edges:
+                self.remove_edge(u, v) # This calls vm.unvouch()
+
+            # Unvouch all outgoing edges
+            # Must copy list as self.remove_edge modifies the graph
+            out_edges = list(self.graph.out_edges(node))
+            for u, v in out_edges:
+                self.remove_edge(u, v) # This calls vm.unvouch()
+            
+            # Now remove the node from balance list
             if node in self._node_order:
                 idx = self._node_order.index(node)
                 self.balance_list.pop(idx)
             
+            # Remove node from NetworkX graph
+            # This is safe now as all edges are gone
             self.graph.remove_node(node)
+            
+            # Clean up VouchMinimal state
+            if address:
+                if address in self.vm.address_to_idx:
+                    self.vm.address_to_idx.pop(address)
+                if node in self.vm.idx_to_address:
+                    self.vm.idx_to_address.pop(node)
+                if address in self.vm.nodes:
+                    self.vm.nodes.pop(address)
+            
             self._update_node_order()
             self._ensure_balance_consistency()
     
-    def compute_score(self, algo_name: str, **kwargs) -> List[float]:
+    def compute_score(self, **kwargs) -> List[float]:
         """
-        Compute node scores using specified algorithm.
+        Get current node scores from the VouchMinimal algorithm.
         
-        Args:
-            algo_name: Name of the scoring algorithm
-            **kwargs: Additional parameters for the algorithm
+        The scores are computed automatically on vouch/unvouch (add_edge/remove_edge).
+        This method retrieves the current scores.
             
         Returns:
-            List of scores for each node in node order
+            List of scores for each node, in node order
         """
-        G = self.graph
-        N_VERTICES = G.number_of_nodes()
-
-        fallback_scores = np.ones(N_VERTICES) / N_VERTICES if N_VERTICES > 0 else np.array([])
-        previous_scores = kwargs.get('previous_scores', None)
-        input_scores = previous_scores if previous_scores is not None else fallback_scores
-
-        if algo_name == 'random_walk':
-            return self._compute_random_walk(G, input_scores)
-        elif algo_name == 'pagerank':
-            return self._compute_pagerank(G, input_scores)
-        elif algo_name == 'equal_split':
-            return self._compute_equal_split(G, input_scores)
-        elif algo_name == 'argmax':
-            return self._compute_argmax(G, input_scores)
-        else:
-            raise ValueError(f"Unknown algorithm: {algo_name}")
+        scores = []
+        for node_idx in self._node_order:
+            address = self.vm.idx_to_address.get(node_idx)
+            if address:
+                score = self.vm.get_score(address)
+                scores.append(float(score))
+            else:
+                scores.append(0.0)
+        return scores
     
-    def _compute_random_walk(self, G, input_scores) -> List[float]:
-        """Compute scores using random walk algorithm."""
-        return compute_random_walk(G, input_scores)
-    
-    def _compute_pagerank(self, G, input_scores) -> List[float]:
-        """Compute scores using PageRank algorithm."""
-        return compute_pagerank(G, input_scores,
-                                alpha=self.config['ALPHA_PAGERANK'],
-                                sigma=self.config['SIGMA_PAGERANK'],
-                                max_pr_iterations=self.config['MAX_PR_ITERATIONS'])
-
-    def _compute_equal_split(self, G, input_scores) -> List[float]:
-        """Compute scores using equal split algorithm."""
-        return compute_equal_split(G, input_scores, sigma=self.config['SIGMA_EQUAL_SPLIT'])
-    
-    def _compute_argmax(self, G, input_scores) -> List[float]:
-        """Compute scores using argmax algorithm."""
-        return compute_argmax(G, input_scores, sigma=self.config['SIGMA_ARGMAX'])
+    def get_ranks(self) -> List[int]:
+        """
+        Get current node ranks from the VouchMinimal algorithm.
+            
+        Returns:
+            List of ranks for each node, in node order
+        """
+        ranks = []
+        for node_idx in self._node_order:
+            address = self.vm.idx_to_address.get(node_idx)
+            if address:
+                rank = self.vm.get_rank(address)
+                ranks.append(rank)
+            else:
+                ranks.append(self.vm.DEFAULT_RANK) # Use default rank
+        return ranks
 
     def set_balance(self, node: int, balance: float) -> None:
         """Set balance for a specific node."""
@@ -252,9 +337,17 @@ class Network:
         pos = nx.spring_layout(self.graph, seed=42)
         
         if scores is None:
-            scores = np.ones(len(self._node_order)) / len(self._node_order)
+            # If no scores provided, compute them
+            scores = self.compute_score()
         
-        plot_graph_with_scores(self.graph, pos, scores, title)
+        # Normalize scores for better visualization if they are very large
+        scores_array = np.array(scores)
+        if np.max(scores_array) > 0:
+             vis_scores = scores_array / np.max(scores_array)
+        else:
+             vis_scores = scores_array
+        
+        plot_graph_with_scores(self.graph, pos, vis_scores, title)
 
     def __repr__(self) -> str:
         """String representation of the network."""
@@ -271,22 +364,38 @@ class Network:
 
 # Example usage
 if __name__ == "__main__":
+    # Import utility files needed for the example
+    # Ensure contract_interface_mvp.py, utils.py, and plot_utils.py are present
+    
     # Create a random network
     net = Network.init_random(10, balance_range=(10, 100), random_name='erdos_renyi')
     print(f"Network: {net}")
     
-    # Compute scores
-    pagerank_scores = net.compute_score('pagerank')
-    print(f"PageRank Scores: {pagerank_scores}")
+    # Compute scores (they are already computed by __init__ due to vouches)
+    initial_scores = net.compute_score()
+    initial_ranks = net.get_ranks()
+    print(f"Initial Scores: {initial_scores}")
+    print(f"Initial Ranks: {initial_ranks}")
     
     # Display graph with scores
-    net.display_graph(scores=pagerank_scores, title="PageRank on Random Network")
+    net.display_graph(scores=initial_scores, title="Scores on Random Network")
     
     # Test modifications
     net.add_node(10, balance=50.0)
-    net.add_edge(0, 10)
+    net.add_edge(0, 10) # This will trigger vm.vouch() and recompute scores
     net.set_balance(0, 200.0)
     print(f"\nAfter modifications: {net}")
     
-    new_scores = net.compute_score('pagerank')
+    new_scores = net.compute_score()
+    new_ranks = net.get_ranks()
+    print(f"New Scores: {new_scores}")
+    print(f"New Ranks: {new_ranks}")
     net.display_graph(scores=new_scores, title="After Modifying Network")
+    
+    # Test node removal
+    net.remove_node(0)
+    print(f"\nAfter removing node 0: {net}")
+    final_scores = net.compute_score()
+    print(f"Final Scores: {final_scores}")
+    net.display_graph(scores=final_scores, title="After Removing Node 0")
+
