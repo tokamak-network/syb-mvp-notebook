@@ -400,7 +400,8 @@ class SYBMvpUserInterface:
                 node_order = sorted(G.nodes())
                 labels = {}
                 node_scores = {}
-                node_ranks = {}
+                node_ranks = {}  # Display strings
+                node_rank_values = {}  # Numeric rank values for sizing
                 node_names = {}
                 
                 for idx in node_order:
@@ -417,11 +418,13 @@ class SYBMvpUserInterface:
                         labels[idx] = f"{user_name}<br>Rank: {rank_display}<br>Score: {score_val:,.0f}"
                         node_scores[idx] = score_val
                         node_ranks[idx] = rank_display
+                        node_rank_values[idx] = rank  # Store numeric rank for sizing
                         node_names[idx] = user_name
                     else:
                         labels[idx] = f"Node {idx}"
                         node_scores[idx] = 0.0
                         node_ranks[idx] = "N/A"
+                        node_rank_values[idx] = DEFAULT_RANK  # Use default rank for unknown nodes
                         node_names[idx] = f"Node {idx}"
                 
                 # Map scores to colors using continuous colormap
@@ -442,11 +445,29 @@ class SYBMvpUserInterface:
                 # Use viridis colormap for continuous score values
                 colormap = cm.get_cmap('viridis')
                 
-                # Prepare node colors based on score
+                # Collect all rank values for size scaling
+                rank_values_list = [node_rank_values[idx] for idx in node_order]
+                
+                # Filter out DEFAULT_RANK for min/max calculation (treat as worst)
+                non_default_ranks = [r for r in rank_values_list if r < DEFAULT_RANK]
+                
+                if non_default_ranks:
+                    min_rank = min(non_default_ranks)
+                    max_rank = max(non_default_ranks)
+                else:
+                    min_rank = DEFAULT_RANK
+                    max_rank = DEFAULT_RANK
+                
+                # Size range: min_size for worst rank, max_size for best rank
+                min_size = 15
+                max_size = 35
+                
+                # Prepare node colors based on score and sizes based on rank
                 node_colors_final = []
                 node_sizes_final = []
                 for idx in node_order:
                     score = node_scores[idx]
+                    rank_val = node_rank_values[idx]
                     
                     # Normalize score to [0, 1] for colormap
                     if max_score > min_score:
@@ -457,14 +478,28 @@ class SYBMvpUserInterface:
                     # Get color from colormap
                     rgba = colormap(normalized_score)
                     color = mcolors.rgb2hex(rgba)
-                    
                     node_colors_final.append(color)
                     
-                    # Highlight focus node with slightly larger size (border handled in separate trace)
-                    if idx == self.focus_node_idx:
-                        node_sizes_final.append(30)  # Slightly larger for focus
+                    # Calculate size based on rank (lower rank = larger size = higher scalability)
+                    if rank_val >= DEFAULT_RANK:
+                        # DEFAULT_RANK gets smallest size
+                        normalized_rank = 0.0
+                    elif max_rank > min_rank:
+                        # Lower rank number = better = larger size
+                        # Invert: (max_rank - rank_val) / (max_rank - min_rank)
+                        normalized_rank = (max_rank - rank_val) / (max_rank - min_rank)
                     else:
-                        node_sizes_final.append(25)  # Uniform size for non-focus nodes
+                        # All ranks are the same
+                        normalized_rank = 0.5
+                    
+                    # Map normalized rank to size range
+                    base_size = min_size + normalized_rank * (max_size - min_size)
+                    
+                    # Add small boost for focus node
+                    if idx == self.focus_node_idx:
+                        node_sizes_final.append(base_size + 5)
+                    else:
+                        node_sizes_final.append(base_size)
                 
                 # Prepare edge traces with arrows
                 edge_x = []
