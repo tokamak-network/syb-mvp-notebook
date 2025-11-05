@@ -427,25 +427,11 @@ class SYBMvpUserInterface:
                         node_rank_values[idx] = DEFAULT_RANK  # Use default rank for unknown nodes
                         node_names[idx] = f"Node {idx}"
                 
-                # Map scores to colors using continuous colormap
+                # Map ranks to colors and scores to sizes
                 import matplotlib.cm as cm
                 import matplotlib.colors as mcolors
                 
-                # Collect all score values for color mapping
-                score_values_list = [node_scores[idx] for idx in node_order]
-                
-                # Get min and max scores for normalization
-                if score_values_list:
-                    min_score = min(score_values_list)
-                    max_score = max(score_values_list)
-                else:
-                    min_score = 0
-                    max_score = 1
-                
-                # Use viridis colormap for continuous score values
-                colormap = cm.get_cmap('viridis')
-                
-                # Collect all rank values for size scaling
+                # Collect all rank values for color mapping
                 rank_values_list = [node_rank_values[idx] for idx in node_order]
                 
                 # Filter out DEFAULT_RANK for min/max calculation (treat as worst)
@@ -458,42 +444,56 @@ class SYBMvpUserInterface:
                     min_rank = DEFAULT_RANK
                     max_rank = DEFAULT_RANK
                 
-                # Size range: min_size for worst rank, max_size for best rank
+                # Collect all score values for size scaling
+                score_values_list = [node_scores[idx] for idx in node_order]
+                
+                # Get min and max scores for size normalization
+                if score_values_list:
+                    min_score = min(score_values_list)
+                    max_score = max(score_values_list)
+                else:
+                    min_score = 0
+                    max_score = 1
+                
+                # Use viridis colormap for continuous rank values
+                colormap = cm.get_cmap('viridis')
+                
+                # Size range: min_size for lowest score, max_size for highest score
                 min_size = 15
                 max_size = 35
                 
-                # Prepare node colors based on score and sizes based on rank
+                # Prepare node colors based on rank and sizes based on score
                 node_colors_final = []
                 node_sizes_final = []
                 for idx in node_order:
                     score = node_scores[idx]
                     rank_val = node_rank_values[idx]
                     
-                    # Normalize score to [0, 1] for colormap
-                    if max_score > min_score:
-                        normalized_score = (score - min_score) / (max_score - min_score)
-                    else:
-                        normalized_score = 0.5  # Default if all scores are the same
-                    
-                    # Get color from colormap
-                    rgba = colormap(normalized_score)
-                    color = mcolors.rgb2hex(rgba)
-                    node_colors_final.append(color)
-                    
-                    # Calculate size based on rank (lower rank = larger size = higher scalability)
+                    # Normalize rank to [0, 1] for colormap (lower rank = better = lighter color)
                     if rank_val >= DEFAULT_RANK:
-                        # DEFAULT_RANK gets smallest size
+                        # DEFAULT_RANK gets darkest color (lowest value)
                         normalized_rank = 0.0
                     elif max_rank > min_rank:
-                        # Lower rank number = better = larger size
+                        # Lower rank number = better = lighter color
                         # Invert: (max_rank - rank_val) / (max_rank - min_rank)
                         normalized_rank = (max_rank - rank_val) / (max_rank - min_rank)
                     else:
                         # All ranks are the same
                         normalized_rank = 0.5
                     
-                    # Map normalized rank to size range
-                    base_size = min_size + normalized_rank * (max_size - min_size)
+                    # Get color from colormap based on rank
+                    rgba = colormap(normalized_rank)
+                    color = mcolors.rgb2hex(rgba)
+                    node_colors_final.append(color)
+                    
+                    # Calculate size based on score (higher score = larger size)
+                    if max_score > min_score:
+                        normalized_score = (score - min_score) / (max_score - min_score)
+                    else:
+                        normalized_score = 0.5  # Default if all scores are the same
+                    
+                    # Map normalized score to size range
+                    base_size = min_size + normalized_score * (max_size - min_size)
                     
                     # Add small boost for focus node
                     if idx == self.focus_node_idx:
@@ -643,11 +643,11 @@ class SYBMvpUserInterface:
                     )
                 ) if node_x_focus else None
                 
-                # Create color legend using shapes and annotations for score ranges
+                # Create color legend using shapes and annotations for rank ranges
                 legend_shapes = []
                 legend_annotations = []
                 
-                # Build legend showing score-to-color mapping
+                # Build legend showing rank-to-color mapping
                 legend_y_start = 0.98
                 legend_x_start = 0.02
                 legend_x_color = legend_x_start  # X position for color bar
@@ -666,8 +666,12 @@ class SYBMvpUserInterface:
                     rgba = colormap(step_val)
                     step_color = mcolors.rgb2hex(rgba)
                     
-                    # Calculate score value for this step
-                    step_score = min_score + step_val * (max_score - min_score) if max_score > min_score else min_score
+                    # Calculate rank value for this step (inverted: higher step_val = lower rank)
+                    if max_rank > min_rank and max_rank < DEFAULT_RANK:
+                        # Map step_val to rank: step_val 1.0 -> min_rank (best), step_val 0.0 -> max_rank (worst)
+                        step_rank = max_rank - step_val * (max_rank - min_rank)
+                    else:
+                        step_rank = min_rank
                     
                     # Create rectangle for this step
                     y0 = legend_y_bottom + i * step_height
@@ -700,26 +704,27 @@ class SYBMvpUserInterface:
                     )
                 )
                 
-                # Helper function to format score in scientific notation
-                def format_scientific(score):
-                    """Format score as 'a.bc × 10^e' format"""
-                    if score == 0:
-                        return "0"
-                    # Use Python's scientific notation
-                    sci_str = f"{score:.2e}"
-                    # Parse it: e.g., "5.16e+08" -> "5.16" and "8"
-                    if 'e' in sci_str.lower():
-                        base, exp = sci_str.lower().split('e')
-                        # Remove + sign and convert to int then back to string to remove leading zeros
-                        exp_int = int(exp) if exp else 0
-                        # Format as "5.16 * 10^8"
-                        return f"{base} * 10^{exp_int}"
-                    return sci_str
+                # Helper function to format rank display
+                def format_rank(rank_val):
+                    """Format rank for display"""
+                    if rank_val >= DEFAULT_RANK:
+                        return "DEFAULT"
+                    else:
+                        return str(int(rank_val))
                 
-                # Add min and max score labels
+                # Add min and max rank labels (best rank at top, worst at bottom)
+                # Top = best rank (lower number) = lighter color
+                # Bottom = worst rank (higher number or DEFAULT) = darker color
+                if max_rank < DEFAULT_RANK:
+                    best_rank_display = format_rank(min_rank)
+                    worst_rank_display = format_rank(max_rank)
+                else:
+                    best_rank_display = "DEFAULT"
+                    worst_rank_display = "DEFAULT"
+                
                 legend_annotations.append(
                     dict(
-                        text=f"Max: {format_scientific(max_score)}",
+                        text=f"Best Rank: {best_rank_display}",
                         showarrow=False,
                         xref="paper", yref="paper",
                         x=legend_x_text, y=legend_y_start,
@@ -729,7 +734,7 @@ class SYBMvpUserInterface:
                 )
                 legend_annotations.append(
                     dict(
-                        text=f"Min: {format_scientific(min_score)}",
+                        text=f"Worst Rank: {worst_rank_display}",
                         showarrow=False,
                         xref="paper", yref="paper",
                         x=legend_x_text, y=legend_y_bottom,
@@ -741,7 +746,7 @@ class SYBMvpUserInterface:
                 # Add bottom annotation about color meaning
                 legend_annotations.append(
                     dict(
-                        text="Node color represents score (lighter = higher score)",
+                        text="Node color represents rank (lighter = better rank), size represents score",
                         showarrow=False,
                         xref="paper", yref="paper",
                         x=0.005, y=-0.002,
