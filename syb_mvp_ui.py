@@ -663,6 +663,7 @@ class SYBMvpUserInterface:
                     hoverinfo='text',
                     hovertext=node_text_normal,
                     marker=dict(
+                        symbol='circle',
                         color=node_colors_normal,
                         size=node_sizes_normal,
                         opacity=1.0,
@@ -676,10 +677,12 @@ class SYBMvpUserInterface:
                     hoverinfo='text',
                     hovertext=node_text_focus,
                     marker=dict(
+                        symbol='diamond',
                         color=node_colors_focus,
                         size=node_sizes_focus,
                         opacity=1.0,
-                        line=dict(width=4, color='#FFD700')  # Gold border, thicker
+                        #line=dict(width=4, color='#FFD700')  # Gold border, thicker
+                        line=dict(width=0, color='black')  # No border on focus node
                     )
                 ) if node_x_focus else None
                 
