@@ -466,20 +466,75 @@ class SYBMvpUserInterface:
                     else:
                         node_sizes_final.append(25)  # Uniform size for non-focus nodes
                 
-                # Prepare edge traces (simple lines, no arrows)
+                # Prepare edge traces with arrows
                 edge_x = []
                 edge_y = []
+                arrow_annotations = []
                 
                 # Ensure G is a DiGraph to get directed edges
                 if not isinstance(G, nx.DiGraph):
                     G = nx.DiGraph(G)
                 
-                # Draw simple edges connecting nodes
+                # Node radius for arrow positioning (approximate based on node size)
+                # Calculate approximate node radius from layout scale
+                if len(pos) > 0:
+                    all_x = [p[0] for p in pos.values()]
+                    all_y = [p[1] for p in pos.values()]
+                    layout_scale = max(max(all_x) - min(all_x), max(all_y) - min(all_y)) if all_x and all_y else 1.0
+                    node_radius = layout_scale * 0.03  # Proportional to layout scale
+                else:
+                    node_radius = 0.03
+                
+                # Draw edges and create arrow annotations
                 for edge in G.edges():
                     x0, y0 = pos[edge[0]]
                     x1, y1 = pos[edge[1]]
                     edge_x.extend([x0, x1, None])
                     edge_y.extend([y0, y1, None])
+                    
+                    # Calculate arrow position in the middle of the edge
+                    dx = x1 - x0
+                    dy = y1 - y0
+                    edge_length = np.sqrt(dx**2 + dy**2)
+                    
+                    if edge_length > 0:
+                        # Calculate midpoint of the edge
+                        mid_x = (x0 + x1) / 2
+                        mid_y = (y0 + y1) / 2
+                        
+                        # Normalize direction vector
+                        dx_norm = dx / edge_length
+                        dy_norm = dy / edge_length
+                        
+                        # Arrow length as a fraction of edge length
+                        arrow_length = edge_length * 0.55  # 15% of edge length
+                        
+                        # Position arrow start (tail) slightly before midpoint
+                        arrow_start_x = mid_x - dx_norm * arrow_length / 2
+                        arrow_start_y = mid_y - dy_norm * arrow_length / 2
+                        
+                        # Position arrow end (head) slightly after midpoint
+                        arrow_end_x = mid_x + dx_norm * arrow_length / 2
+                        arrow_end_y = mid_y + dy_norm * arrow_length / 2
+                        
+                        # Add arrow annotation centered on the edge
+                        arrow_annotations.append(
+                            dict(
+                                ax=arrow_start_x,
+                                ay=arrow_start_y,
+                                x=arrow_end_x,
+                                y=arrow_end_y,
+                                xref='x',
+                                yref='y',
+                                axref='x',
+                                ayref='y',
+                                showarrow=True,
+                                arrowhead=2,  # Cool arrow shape
+                                arrowsize=1.2,
+                                arrowwidth=1.8,
+                                arrowcolor='#888'
+                            )
+                        )
                 
                 edge_trace = go.Scatter(
                     x=edge_x, y=edge_y,
@@ -672,6 +727,9 @@ class SYBMvpUserInterface:
                 if node_trace_focus:
                     figure_data.append(node_trace_focus)
                 
+                # Combine arrow annotations with legend annotations
+                all_annotations = arrow_annotations + legend_annotations
+                
                 fig = go.Figure(
                     data=figure_data,
                     layout=go.Layout(
@@ -682,7 +740,7 @@ class SYBMvpUserInterface:
                         showlegend=False,
                         hovermode='closest',
                         margin=dict(b=20, l=5, r=5, t=40),
-                        annotations=legend_annotations,
+                        annotations=all_annotations,
                         shapes=legend_shapes,
                         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
