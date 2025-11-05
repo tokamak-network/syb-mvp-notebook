@@ -8,6 +8,7 @@ from plot_utils import plot_graph_with_scores
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import numpy as np
+from utils import generate_alphabetical_names
 
 
 def create_random_mvp_network(num_users=8) -> tuple:
@@ -65,9 +66,41 @@ class SYBMvpUserInterface:
         if current_user_address in contract.address_to_idx:
             self.focus_node_idx = contract.address_to_idx[current_user_address]
         
+        # Generate name mapping for all users
+        self._name_mapping = self._generate_name_mapping()
+        
         self._create_widgets()
         self._create_interface()
         self._connect_events()
+    
+    def _generate_name_mapping(self) -> dict:
+        """Generate mapping from 'User 0', 'User 1', etc. to real names."""
+        # Get all user names
+        user_names = [data['name'] for data in self.users.values()]
+        # Extract user indices
+        user_indices = {}
+        for name in user_names:
+            if name.startswith('User '):
+                try:
+                    idx = int(name.split()[1])
+                    user_indices[name] = idx
+                except (ValueError, IndexError):
+                    pass
+        
+        # Generate real names
+        if user_indices:
+            max_idx = max(user_indices.values())
+            real_names = generate_alphabetical_names(max_idx + 1)
+            # Create mapping
+            mapping = {}
+            for name, idx in user_indices.items():
+                mapping[name] = real_names[idx]
+            return mapping
+        return {}
+    
+    def _get_display_name(self, name: str) -> str:
+        """Get display name (real name if available, otherwise original)."""
+        return self._name_mapping.get(name, name)
     
     def _create_widgets(self):
         """Create UI widgets."""
@@ -114,7 +147,8 @@ class SYBMvpUserInterface:
             if addr != self.current_user_address:
                 # Check if already vouched
                 if not self.contract.has_vouch(self.current_user_address, addr):
-                    label = f"{data['name']} ({addr[:10]}...)"
+                    display_name = self._get_display_name(data['name'])
+                    label = f"{display_name} ({addr[:10]}...)"
                     options.append((label, addr))
         return options if options else [("No users available", None)]
     
@@ -125,7 +159,8 @@ class SYBMvpUserInterface:
             if addr != self.current_user_address:
                 # Only show if already vouched
                 if self.contract.has_vouch(self.current_user_address, addr):
-                    label = f"{data['name']} ({addr[:10]}...)"
+                    display_name = self._get_display_name(data['name'])
+                    label = f"{display_name} ({addr[:10]}...)"
                     options.append((label, addr))
         return options if options else [("No vouches to remove", None)]
     
@@ -238,6 +273,7 @@ class SYBMvpUserInterface:
     def _update_user_info(self):
         """Update current user information display."""
         user_name = self.users[self.current_user_address]['name']
+        display_name = self._get_display_name(user_name)
         rank = self.contract.get_rank(self.current_user_address)
         score = self.contract.get_score(self.current_user_address)
         outdegree = self.contract.get_outdegree(self.current_user_address)
@@ -251,7 +287,7 @@ class SYBMvpUserInterface:
         
         html = f"""
         <div style='padding: 10px; font-size: 14px;'>
-            <div style='padding: 5px;'><strong>Name:</strong> {user_name}</div>
+            <div style='padding: 5px;'><strong>Name:</strong> {display_name}</div>
             <div style='padding: 5px;'><strong>Address:</strong> {self.current_user_address}</div>
             <div style='padding: 5px;'><strong>Rank:</strong> {rank_display}</div>
             <div style='padding: 5px;'><strong>Score:</strong> {score:,}</div>
@@ -287,8 +323,9 @@ class SYBMvpUserInterface:
             else:
                 prev_rank_display = "DEFAULT" if prev_rank >= DEFAULT_RANK else str(prev_rank)
             
+            display_name = self._get_display_name(data['name'])
             user_stats.append({
-                'name': data['name'],
+                'name': display_name,
                 'rank': rank_display,
                 'prev_rank': prev_rank_display,
                 'score': score,
@@ -408,6 +445,7 @@ class SYBMvpUserInterface:
                     address = self.contract.idx_to_address.get(idx)
                     if address:
                         user_name = self.users[address]['name']
+                        display_name = self._get_display_name(user_name)
                         # Get score index from full network node order
                         full_node_order = sorted(self.contract.network.nodes())
                         score_idx = full_node_order.index(idx) if idx in full_node_order else 0
@@ -415,11 +453,11 @@ class SYBMvpUserInterface:
                         rank = self.contract.get_rank(address)
                         rank_display = "Default rank" if rank >= DEFAULT_RANK else str(rank)
                         
-                        labels[idx] = f"{user_name}<br>Rank: {rank_display}<br>Score: {score_val:,.0f}"
+                        labels[idx] = f"{display_name}<br>Rank: {rank_display}<br>Score: {score_val:,.0f}"
                         node_scores[idx] = score_val
                         node_ranks[idx] = rank_display
                         node_rank_values[idx] = rank  # Store numeric rank for sizing
-                        node_names[idx] = user_name
+                        node_names[idx] = display_name
                     else:
                         labels[idx] = f"Node {idx}"
                         node_scores[idx] = 0.0
@@ -436,11 +474,13 @@ class SYBMvpUserInterface:
                 
                 # Filter out DEFAULT_RANK for min/max calculation (treat as worst)
                 non_default_ranks = [r for r in rank_values_list if r < DEFAULT_RANK]
+                has_default_ranks = any(r >= DEFAULT_RANK for r in rank_values_list)
                 
                 if non_default_ranks:
                     min_rank = min(non_default_ranks)
                     max_rank = max(non_default_ranks)
                 else:
+                    # All ranks are DEFAULT_RANK
                     min_rank = DEFAULT_RANK
                     max_rank = DEFAULT_RANK
                 
@@ -626,7 +666,7 @@ class SYBMvpUserInterface:
                         color=node_colors_normal,
                         size=node_sizes_normal,
                         opacity=1.0,
-                        line=dict(width=2, color='black')
+                        line=dict(width=0, color='black')  # No border on non-focus nodes
                     )
                 )
                 
@@ -660,18 +700,19 @@ class SYBMvpUserInterface:
                 legend_y_bottom = legend_y_start - legend_height
                 step_height = legend_height / num_legend_steps
                 
+                # Helper function to format rank display
+                def format_rank(rank_val):
+                    """Format rank for display"""
+                    if rank_val >= DEFAULT_RANK:
+                        return "DEFAULT RANK"
+                    else:
+                        return str(int(rank_val))
+                
                 for i in range(num_legend_steps):
                     # Normalize step to [0, 1]
                     step_val = i / (num_legend_steps - 1) if num_legend_steps > 1 else 0
                     rgba = colormap(step_val)
                     step_color = mcolors.rgb2hex(rgba)
-                    
-                    # Calculate rank value for this step (inverted: higher step_val = lower rank)
-                    if max_rank > min_rank and max_rank < DEFAULT_RANK:
-                        # Map step_val to rank: step_val 1.0 -> min_rank (best), step_val 0.0 -> max_rank (worst)
-                        step_rank = max_rank - step_val * (max_rank - min_rank)
-                    else:
-                        step_rank = min_rank
                     
                     # Create rectangle for this step
                     y0 = legend_y_bottom + i * step_height
@@ -704,27 +745,29 @@ class SYBMvpUserInterface:
                     )
                 )
                 
-                # Helper function to format rank display
-                def format_rank(rank_val):
-                    """Format rank for display"""
-                    if rank_val >= DEFAULT_RANK:
-                        return "DEFAULT"
-                    else:
-                        return str(int(rank_val))
-                
                 # Add min and max rank labels (best rank at top, worst at bottom)
                 # Top = best rank (lower number) = lighter color
                 # Bottom = worst rank (higher number or DEFAULT) = darker color
-                if max_rank < DEFAULT_RANK:
+                if non_default_ranks and max_rank > min_rank:
+                    # We have varying non-default ranks
                     best_rank_display = format_rank(min_rank)
                     worst_rank_display = format_rank(max_rank)
+                elif non_default_ranks and has_default_ranks:
+                    # Some nodes have non-default ranks, some have DEFAULT_RANK
+                    best_rank_display = format_rank(min_rank)
+                    worst_rank_display = "DEFAULT RANK"
+                elif non_default_ranks:
+                    # All non-default ranks are the same
+                    best_rank_display = format_rank(min_rank)
+                    worst_rank_display = format_rank(min_rank)
                 else:
-                    best_rank_display = "DEFAULT"
-                    worst_rank_display = "DEFAULT"
+                    # All ranks are DEFAULT_RANK
+                    best_rank_display = "DEFAULT RANK"
+                    worst_rank_display = "DEFAULT RANK"
                 
                 legend_annotations.append(
                     dict(
-                        text=f"Best Rank: {best_rank_display}",
+                        text=best_rank_display,
                         showarrow=False,
                         xref="paper", yref="paper",
                         x=legend_x_text, y=legend_y_start,
@@ -734,7 +777,7 @@ class SYBMvpUserInterface:
                 )
                 legend_annotations.append(
                     dict(
-                        text=f"Worst Rank: {worst_rank_display}",
+                        text=worst_rank_display,
                         showarrow=False,
                         xref="paper", yref="paper",
                         x=legend_x_text, y=legend_y_bottom,
@@ -831,7 +874,9 @@ class SYBMvpUserInterface:
     def display(self):
         """Display the MVP interface."""
         plt.close('all')
-        print(f"🔐 Connected as: {self.users[self.current_user_address]['name']} ({self.current_user_address[:12]}...)")
+        user_name = self.users[self.current_user_address]['name']
+        display_name = self._get_display_name(user_name)
+        print(f"🔐 Connected as: {display_name} ({self.current_user_address[:12]}...)")
         print("✅ MVP Contract Interface - Transactions process immediately!")
         
         # Initial updates
