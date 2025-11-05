@@ -792,7 +792,7 @@ class SYBMvpUserInterface:
                 # Add bottom annotation about color meaning
                 legend_annotations.append(
                     dict(
-                        text="Node color represents rank (lighter = better rank), size represents score",
+                        text="Node color represents rank (lighter = better rank), size represents score (bigger = higher score).",
                         showarrow=False,
                         xref="paper", yref="paper",
                         x=0.005, y=-0.002,
