@@ -12,7 +12,7 @@ There are two ways to run this interactive demo:
 
 ### 1\. Binder (Recommended)
 
-The easiest way to run this notebook is by using Binder, at the following [link](link).
+The easiest way to run this notebook is by using Binder, at the following [link](https://mybinder.org/v2/gh/tokamak-network/syb-jupyter-notebooks/64cd5e7f6e690f0883998e572b398e0f4d93623e?urlpath=lab%2Ftree%2Fsyb_mvp.ipynb).
 
 
 ### 2\. Local Installation
