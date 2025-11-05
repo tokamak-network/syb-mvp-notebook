@@ -751,66 +751,6 @@ class SYBMvpUserInterface:
                 # Display plotly figure in Jupyter widget output
                 from IPython.display import display
                 display(fig)
-                
-                # TODO: an alternative to use the matplotlib code to display the graph
-                # COMMENTED OUT: Original matplotlib code
-                # # Create figure with interactive mode OFF
-                # plt.ioff()
-                # fig, ax = plt.subplots(figsize=(12, 10))
-                # 
-                # # Color the focus node differently
-                # node_colors = []
-                # node_sizes = []
-                # for node in node_order:
-                #     if node == self.focus_node_idx:
-                #         node_colors.append('gold')
-                #         node_sizes.append(2000)
-                #     else:
-                #         node_colors.append('skyblue')
-                #         node_sizes.append(1500)
-                # 
-                # nx.draw(
-                #     G,
-                #     pos,
-                #     ax=ax,
-                #     with_labels=False,
-                #     node_color=node_colors,
-                #     node_size=node_sizes,
-                #     edge_color='gray',
-                #     width=2,
-                # )
-                # nx.draw_networkx_labels(
-                #     G,
-                #     pos,
-                #     labels=labels,
-                #     ax=ax,
-                #     font_size=9,
-                #     font_color='black'
-                # )
-                # # Update title based on whether showing subgraph or full graph
-                # if self.focus_node_idx is not None and self.focus_node_idx in self.contract.network.nodes():
-                #     focus_name = labels.get(self.focus_node_idx, f"Node {self.focus_node_idx}")
-                #     # Extract just the name part (before newline)
-                #     focus_display = focus_name.split('\n')[0] if '\n' in focus_name else focus_name
-                #     title = f"SYB Network Graph - Focused on {focus_display}"
-                # else:
-                #     title = "SYB Network Graph (Rank & Score) - Full View"
-                # ax.set_title(title, fontsize=18, fontweight='bold')
-                # ax.axis('off')
-                # plt.subplots_adjust(left=0.05, right=0.95, top=0.95, bottom=0.05)
-                #
-                # # Render to buffer and display as image to avoid matplotlib display hooks
-                # import io
-                # from IPython.display import display as ipy_display, Image as IPyImage
-                #
-                # buf = io.BytesIO()
-                # fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-                # buf.seek(0)
-                # img_data = buf.getvalue()
-                # buf.close()
-                #
-                # # Display the image directly - bypasses matplotlib's display system
-                # ipy_display(IPyImage(data=img_data))
         finally:
             self._updating_graph = False
     
