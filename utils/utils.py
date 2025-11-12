@@ -5,13 +5,6 @@ from typing import List, Dict, Optional, Tuple
 
 import networkx as nx
 
-from contract_interface import (
-    TXN_DEPOSIT_NEW_ACCOUNT,
-    TXN_DEPOSIT_EXISTING,
-    TXN_WITHDRAW,
-    TXN_VOUCH,
-    TXN_UNVOUCH,
-)
 from contract_interface_mvp import VouchMinimal
 
 # Fake ethereum address generator
