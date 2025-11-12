@@ -66,7 +66,7 @@ The `syb_mvp.ipynb` notebook guides you through a scripted, then interactive, se
   * **`syb_mvp.ipynb`**: The main Jupyter Notebook. It contains the markdown explanations, the scripted tutorial, and the code to launch the interactive UI.
   * **`syb_mvp_ui.py`**: This file contains the `SYBMvpUserInterface` class, which builds the interactive UI using `ipywidgets` and Plotly.
   * **`contract_interface_mvp.py`**: A core file containing the Python implementation of the `VouchMinimal` smart contract. It manages node states, handles `vouch`/`unvouch` logic, and computes the ranks and scores.
-  * **`plot_utils.py`**: Contains the `show_network_status` and `show_network_graph` helper functions, which are used by the notebook to render the status tables and the Plotly network graph.
+  * **`utils/plot_utils.py`**: Contains the `show_network_status` and `show_network_graph` helper functions, which are used by the notebook to render the status tables and the Plotly network graph.
   * **`requirements.txt`**: A list of all Python dependencies required to run the notebook, including `networkx`, `plotly`, `ipywidgets`, and `nbformat`.
 
 ## 🔗 References
