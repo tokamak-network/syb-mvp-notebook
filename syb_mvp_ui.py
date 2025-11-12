@@ -134,12 +134,6 @@ class SYBMvpUserInterface:
     
     def _create_interface(self):
         """Create main interface layout."""
-        # User info section
-        user_info_box = widgets.VBox([
-            widgets.HTML(value="<h3>👤 Current User</h3>"),
-            self.user_info_display
-        ], layout=widgets.Layout(border='2px solid #2E86AB', padding='15px'))
-        
         # Actions section
         vouch_row = widgets.HBox([
             self.vouch_target,
@@ -151,36 +145,46 @@ class SYBMvpUserInterface:
             self.unvouch_btn
         ], layout=widgets.Layout(margin='5px'))
         
-        actions_box = widgets.VBox([
-            widgets.HTML(value="<h3>⚡ Actions</h3>"),
-            vouch_row,
-            unvouch_row,
-            self.action_output
-        ], layout=widgets.Layout(border='2px solid #4CAF50', padding='15px'))
-        
-        # Status section
-        status_box = widgets.VBox([
-            widgets.HTML(value="<h3>📊 Network Status</h3>"),
-            self.status_display
-        ], layout=widgets.Layout(border='2px solid #FF9800', padding='15px', width='100%'))
-        
         # Graph section
         graph_box = widgets.VBox([
             widgets.HTML(value="<h3>🌐 Network Graph</h3>"),
             self.graph_output
-        ], layout=widgets.Layout(border='2px solid #9C27B0', padding='15px'))
+        ], layout=widgets.Layout(padding='0px', width='100%'))
         
-        # Main layout - side by side
-        top_row = widgets.HBox([
-            user_info_box,
-            actions_box
-        ], layout=widgets.Layout(justify_content='space-between'))
+        # Controls section (current user info + actions)
+        user_info_section = widgets.VBox([
+            widgets.HTML(value="<h4>👤 Current User</h4>"),
+            self.user_info_display,
+        ], layout=widgets.Layout(flex='1 1 0%', padding='0 20px 0 0'))
+        
+        actions_section = widgets.VBox([
+            widgets.HTML(value="<h4>⚡ Actions</h4>"),
+            vouch_row,
+            unvouch_row,
+            self.action_output,
+        ], layout=widgets.Layout(flex='1 1 0%', padding='0 0 0 20px'))
+        
+        controls_row = widgets.HBox(
+            [user_info_section, actions_section],
+            layout=widgets.Layout(width='100%', justify_content='space-between', align_items='flex-start')
+        )
+        
+        controls_box = widgets.VBox([
+            widgets.HTML(value="<h3>⚙️ Controls</h3>"),
+            controls_row,
+        ], layout=widgets.Layout(padding='10px 0', width='100%'))
+        
+        # Status section (table / network status)
+        status_box = widgets.VBox([
+            widgets.HTML(value="<h3>📊 Network Status</h3>"),
+            self.status_display
+        ], layout=widgets.Layout(padding='10px 0', width='100%'))
         
         self.interface = widgets.VBox([
-            top_row,
+            graph_box,
+            controls_box,
             status_box,
-            graph_box
-        ])
+        ], layout=widgets.Layout(width='100%'))
     
     def _connect_events(self):
         """Connect button events to handlers."""
