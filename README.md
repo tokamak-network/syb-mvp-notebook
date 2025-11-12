@@ -12,7 +12,7 @@ There are two ways to run this interactive demo:
 
 ### 1\. Binder (Recommended)
 
-The easiest way to run this notebook is by using Binder, at the following [link](https://mybinder.org/v2/gh/tokamak-network/syb-jupyter-notebooks/64cd5e7f6e690f0883998e572b398e0f4d93623e?urlpath=lab%2Ftree%2Fsyb_mvp.ipynb).
+The easiest way to run this notebook is by using Binder, at the following [link](https://mybinder.org/v2/gh/tokamak-network/syb-mvp-notebook/HEAD?urlpath=%2Fdoc%2Ftree%2Fsyb_mvp.ipynb).
 
 
 ### 2\. Local Installation
@@ -22,8 +22,8 @@ To run the notebook on your own machine, follow these steps:
 1.  **Clone the repository:**
 
     ```bash
-    git clone https://github.com/YOUR_USERNAME/YOUR_REPOSITORY_NAME.git
-    cd YOUR_REPOSITORY_NAME
+    git clone https://github.com/tokamak-network/syb-mvp-notebook.git
+    cd syb-mvp-notebook
     ```
 
 2.  **Create a virtual environment:**
