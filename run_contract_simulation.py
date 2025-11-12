@@ -5,8 +5,8 @@ import pandas as pd
 import os
 import networkx as nx
 from contract_interface_mvp import VouchMinimal
-from utils import generate_mul_eth_addresses
-from plot_graphs import plot_graph_evolution_with_scores
+from utils.utils import generate_mul_eth_addresses
+from utils.plot_graphs import plot_graph_evolution_with_scores
 import random # Import random for NvM simulation
 
 # --- History Tracking & Plotting (No Changes) ---

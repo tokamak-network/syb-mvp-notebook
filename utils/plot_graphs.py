@@ -2,7 +2,6 @@
 
 import networkx as nx
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import numpy as np
 import math
 import os
@@ -11,7 +10,7 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
     """
     Plots a sequence of graphs with fixed node positions and captions,
     displaying node labels and scores, with each graph inside a box.
-    
+
     Styling is updated to match the "notebook" style:
     - 'skyblue' nodes
     - Node size is proportional to score
@@ -23,20 +22,20 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
     num_graphs = len(graphs)
     cols = min(num_graphs, 5)
     rows = math.ceil(num_graphs / cols)
-    
+
     # --- Find all nodes present across all graphs for stable layout ---
     all_nodes = set()
     for G in graphs:
         all_nodes.update(G.nodes())
-    
+
     if not all_nodes:
         print("All graphs are empty.")
         return
-    
+
     # Create a dummy graph with all nodes that ever appear
     dummy_graph = nx.Graph()
     dummy_graph.add_nodes_from(sorted(list(all_nodes)))
-    
+
     if layout_type == "circular":
         pos = nx.circular_layout(dummy_graph)
     elif layout_type == "spring":
@@ -49,7 +48,7 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
     else:
         # Default to circular layout if an unknown type is provided
         pos = nx.circular_layout(dummy_graph)
-    
+
     fig, axes = plt.subplots(rows, cols, figsize=(4 * cols, 4 * rows))
     if num_graphs == 1:
         axes = np.array([axes])
@@ -59,15 +58,15 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
 
     for i, G in enumerate(graphs):
         ax = axes[i]
-        
+
         # Get nodes *actually in this graph*
         nodes_in_g = sorted(list(G.nodes()))
-        
+
         # Get scores for the current step
         current_scores_dict = scores_list[i] if i < len(scores_list) else {}
-        
+
         # --- Start: Styling Logic (like notebook) ---
-        
+
         # 1. Get scores for current nodes
         scores_for_nodes = [current_scores_dict.get(node, 0.0) for node in nodes_in_g]
 
@@ -85,11 +84,11 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
         node_sizes = []
         min_size = 300
         max_size = 1500
-        
+
         if scores_for_nodes and max(scores_for_nodes) > 0:
             min_s = min(scores_for_nodes)
             max_s = max(scores_for_nodes)
-            
+
             if max_s > min_s:
                 for score in scores_for_nodes:
                     # Normalize score (0 to 1)
@@ -105,9 +104,9 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
 
         # 4. Set Node Color
         node_colors = 'skyblue'
-        
+
         # --- End: Styling Logic ---
-        
+
         # Get caption for the evolution
         caption = ""
         if is_random_evolution:
@@ -120,7 +119,7 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
                 current_edges = set(G.edges())
                 added_edges = list(current_edges - prev_edges)
                 removed_edges = list(prev_edges - current_edges)
-                
+
                 # Check for node changes
                 prev_nodes = set(graphs[i-1].nodes())
                 current_nodes = set(G.nodes())
@@ -134,11 +133,11 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
                     caption = f"Removed edge {tuple(sorted(removed_edges[0]))}"
                 else:
                     caption = "No change"
-        
+
         # Draw the graph with fixed layout, node labels, and a single edge color
         nx.draw(
-            G, pos, ax=ax, 
-            with_labels=False, 
+            G, pos, ax=ax,
+            with_labels=False,
             node_color=node_colors,  # <-- Use new style
             node_size=node_sizes,    # <-- Use new style
             edge_color='gray',
@@ -146,10 +145,10 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
             edgelist=list(G.edges()) # Only draw edges in G
         )
         nx.draw_networkx_labels(G, pos, labels=labels, ax=ax, font_size=8)
-        
+
         ax.set_title(f"Step {i}")
         ax.text(0.5, -0.15, caption, ha='center', transform=ax.transAxes, fontsize=10)
-        
+
         # Add the delimiting box
         ax.spines['top'].set_visible(True)
         ax.spines['right'].set_visible(True)
@@ -159,13 +158,13 @@ def plot_graph_evolution_with_scores(graphs, scores_list, title_prefix, layout_t
         ax.spines['right'].set_linewidth(1.5)
         ax.spines['bottom'].set_linewidth(1.5)
         ax.spines['left'].set_linewidth(1.5)
-        
+
     for j in range(num_graphs, len(axes)):
         axes[j].axis('off')
 
     plt.suptitle(title_prefix, fontsize=16)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    
+
     # --- Add save logic ---
     if filename:
         output_dir = "plots"
@@ -186,10 +185,11 @@ def display_graph_state(graph, scores, title):
     if not graph.nodes():
         print("Graph is empty.")
         return
-        
+
     for node in sorted(graph.nodes()):
         score = scores.get(node, 0.0) # Use .get() for safety
         neighbors = sorted(list(graph.neighbors(node)))
         # Use .2e for score to match plotting
         print(f"Node {node:<2} | Score: {score:<10.2e} | Neighbors: {neighbors}")
     print("-" * (len(title) + 6))
+

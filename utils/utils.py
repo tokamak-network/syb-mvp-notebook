@@ -2,7 +2,17 @@ import random
 import threading
 import time
 from typing import List, Dict, Optional, Tuple
-from contract_interface import TXN_DEPOSIT_NEW_ACCOUNT, TXN_DEPOSIT_EXISTING, TXN_WITHDRAW, TXN_VOUCH, TXN_UNVOUCH
+
+import networkx as nx
+
+from contract_interface import (
+    TXN_DEPOSIT_NEW_ACCOUNT,
+    TXN_DEPOSIT_EXISTING,
+    TXN_WITHDRAW,
+    TXN_VOUCH,
+    TXN_UNVOUCH,
+)
+from contract_interface_mvp import VouchMinimal
 
 # Fake ethereum address generator
 def generate_random_eth_address():
@@ -15,10 +25,10 @@ def generate_mul_eth_addresses(n):
 def generate_alphabetical_names(n: int) -> List[str]:
     """
     Generate alphabetical names in order: Alice, Bob, Charlie, David, etc.
-    
+
     Args:
         n: Number of names to generate
-        
+
     Returns:
         List of names in alphabetical order
     """
@@ -27,7 +37,7 @@ def generate_alphabetical_names(n: int) -> List[str]:
         "Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Henry",
         "Ivy", "Jack", "Kate", "Leo", "Mia", "Noah", "Olivia", "Paul",
         "Quinn", "Rachel", "Sam", "Tina", "Uma", "Victor", "Wendy", "Xavier",
-        "Yara", "Zoe", 
+        "Yara", "Zoe",
         # Second batch
         "Aaron", "Bella", "Clara", "Dylan", "Eliza", "Finn", "Gina", "Hank",
         "Isabel", "Joel", "Kira", "Liam", "Mona", "Nate", "Opal", "Perry",
@@ -39,7 +49,7 @@ def generate_alphabetical_names(n: int) -> List[str]:
         "Queenie", "Rex", "Sara", "Trevor", "Ulric", "Violet", "Wade", "Ximena",
         "Yvonne", "Zander",
     ]
-    
+
     # If we need more than 26, extend with numbered variants
     if n > len(names):
         # Repeat pattern with numbers
@@ -53,8 +63,42 @@ def generate_alphabetical_names(n: int) -> List[str]:
                 suffix = (i // len(names)) + 1
                 extended.append(f"{names[base_idx]}{suffix}")
         return extended[:n]
-    
+
     return names[:n]
+
+
+def create_random_mvp_network(num_users: int = 8) -> Tuple[VouchMinimal, Dict[str, Dict[str, str]]]:
+    """
+    Create a random MVP network with initial vouches.
+
+    Returns:
+        tuple: (contract, users) where users is a dict mapping addresses to user info
+    """
+    print(f"📊 Creating MVP network with {num_users} users...")
+
+    network = nx.erdos_renyi_graph(num_users, 0.2, directed=True)
+
+    # Filter out edges involving node zero for a cleaner starting graph
+    edges_to_remove = [edge for edge in network.edges() if 0 in edge]
+    network.remove_edges_from(edges_to_remove)
+
+    contract = VouchMinimal(network)
+
+    print(f"✅ Created {contract.network.number_of_edges()} initial vouches")
+
+    users: Dict[str, Dict[str, str]] = {}
+    addresses_by_idx = {idx: addr for idx, addr in contract.idx_to_address.items()}
+    user_names = generate_alphabetical_names(num_users)
+
+    for idx in sorted(addresses_by_idx.keys()):
+        addr = addresses_by_idx[idx]
+        name = user_names[idx] if idx < len(user_names) else f"User {idx}"
+        users[addr] = {
+            "name": name,
+            "address": addr,
+        }
+
+    return contract, users
 
 
 def format_address(address: str, prefix_len: int = 6, suffix_len: int = 4) -> str:
