@@ -1,6 +1,7 @@
 # plot_utils.py
 
 from IPython.display import display, HTML
+import ipywidgets as widgets
 import plotly.graph_objects as go
 import networkx as nx
 import numpy as np
@@ -61,7 +62,7 @@ def build_network_status_html(
     user_stats.sort(key=lambda x: x["name"])
 
     stats_html = f"""
-    <div style='padding: 10px; font-size: 13px;'>
+    <div style='width: 100%; max-width: 100%; padding: 10px; font-size: 13px; box-sizing: border-box;'>
         <div style='padding: 5px;'><strong>👥 Total Users:</strong> {num_users}</div>
         <div style='padding: 5px;'><strong>🔗 Total Vouches:</strong> {num_edges}</div>
         <div style='padding: 10px; margin-top: 10px;'><strong>📈 User Rankings:</strong></div>
@@ -641,7 +642,11 @@ def show_network_status(contract, users, ui):
     """Displays the network status table (logic from ui._update_status)."""
     display_name_fn = getattr(ui, "_get_display_name", None)
     stats_html = build_network_status_html(contract, users, display_name_fn)
-    display(HTML(stats_html))
+    status_widget = widgets.HTML(
+        value=stats_html,
+        layout=widgets.Layout(width='100%', overflow_x='auto')
+    )
+    display(status_widget)
 
 def show_network_graph(contract, users, ui):
     """Displays the network graph (logic from ui._update_graph)."""
