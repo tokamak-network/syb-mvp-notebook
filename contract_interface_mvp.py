@@ -17,9 +17,9 @@ def generate_mul_eth_addresses(n):
     return [generate_random_eth_address() for _ in range(n)]
 
 # --- Constants matching Solidity contract ---
-DEFAULT_RANK = 10**24  # rank if no IN neighbors
-R = 64  # weight window: c_r = 2^(R - r) for r<=R
-BONUS_OUT = 2**59  # per-edge outdegree bonus
+DEFAULT_RANK = 6 #10**24  # rank if no IN neighbors
+R = 5 #64  # weight window: c_r = 2^(R - r) for r<=R
+BONUS_OUT = 1 # 2**59  # per-edge outdegree bonus
 BONUS_CAP = 15  # cap for outdegree bonus
 
 
@@ -162,9 +162,9 @@ class VouchMinimal:
             elif r_u == k:
                 m += 1
         
-        rv = 3 * k + 1 - m
-        if rv <= 0:
-            rv = 1
+        # 3k + 1 - min(m, 3)
+        m_modified = min(m, 3)
+        rv = 3 * k + 1 - m_modified
         
         node.rank = rv
     
