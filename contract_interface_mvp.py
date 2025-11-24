@@ -21,6 +21,7 @@ DEFAULT_RANK = 6 #10**24  # rank if no IN neighbors
 R = 5 #64  # weight window: c_r = 2^(R - r) for r<=R
 BONUS_OUT = 1 # 2**59  # per-edge outdegree bonus
 BONUS_CAP = 15  # cap for outdegree bonus
+SEEDVOUCHCOUNT = 5  # First N vouches seed endpoints to rank=1
 
 
 @dataclass
@@ -40,67 +41,130 @@ class VouchMinimal:
     Implements vouching/unvouching with rank and score computation.
     """
     
+    # def __init__(self, network: nx.DiGraph=None):
+    #     """Initialize contract with network. Generates addresses for integer nodes."""
+    #     self.nodes: Dict[str, Node] = {}
+    #     self.has_edge: Dict[str, Dict[str, bool]] = {}  # from -> to -> bool
+    #     self.seed_vouch_count = 0  # First 5 vouches seed endpoints to rank=1
+    #     self.address_to_idx: Dict[str, int] = {}
+    #     self.idx_to_address: Dict[int, str] = {}
+    #     self._next_idx = 0
+
+    #     """
+    #     reference: https://networkx.org/documentation/stable/reference/generated/networkx.generators.random_graphs.erdos_renyi_graph.html
+    #     Note: the expected network is generated from a random digraph like
+    #     `nx.erdos_renyi_graph(n_nodes, p, directed=True)` where
+    #     - n_nodes is the number of nodes in the network
+    #     - p is the probability of an edge between two nodes
+    #     - directed=True means the graph is directed
+    #     """
+    #     if network is None:
+    #         raise ValueError("Network is required.")
+        
+    #     self.network = network
+        
+    #     # Get all nodes from network
+    #     network_nodes = list(network.nodes())
+        
+    #     # If network is empty, nothing to do
+    #     if not network_nodes:
+    #         return
+        
+    #     # Generate addresses and map network nodes to addresses
+    #     num_nodes = len(network_nodes)
+    #     addresses = generate_mul_eth_addresses(num_nodes)
+    #     node_to_address = dict(zip(sorted(network_nodes), addresses))
+        
+    #     # Set up index mappings to preserve network node indices
+    #     for node_idx, address in node_to_address.items():
+    #         self.address_to_idx[address] = node_idx
+    #         self.idx_to_address[node_idx] = address
+    #         # Ensure a Node object is created for existing nodes
+    #         if address not in self.nodes:
+    #             self.nodes[address] = Node()
+    #         self._next_idx = max(self._next_idx, node_idx + 1)
+        
+    #     # Create vouches for each edge - vouch() handles the rest
+    #     # Make a copy of edges to iterate over as self.vouch modifies the graph
+    #     edges_to_process = list(network.edges())
+    #     for from_node, to_node in edges_to_process:
+    #         from_address = node_to_address.get(from_node)
+    #         to_address = node_to_address.get(to_node)
+    #         if from_address and to_address:
+    #             # Need to manually remove the edge from the graph first
+    #             # because self.vouch() will add it back.
+    #             # This ensures correct state initialization.
+    #             if self.network.has_edge(from_node, to_node):
+    #                 self.network.remove_edge(from_node, to_node)
+    #             try:
+    #                 self.vouch(from_address, to_address)
+    #             except ValueError as e:
+    #                 # e.g., "exists" error if logic is not perfect, just log
+    #                 print(f"Warning during init: {e}")
+        
     def __init__(self, network: nx.DiGraph=None):
-        """Initialize contract with network. Generates addresses for integer nodes."""
+        """
+        Initialize contract with network using Structured Vouch Replay.
+        
+        The replay sequence is:
+        1. Iterate through all source addresses, sorted by index (Alice, Bob, etc.).
+        2. For each source, iterate through its targets, also sorted by index.
+        """
         self.nodes: Dict[str, Node] = {}
         self.has_edge: Dict[str, Dict[str, bool]] = {}  # from -> to -> bool
-        self.seed_vouch_count = 0  # First 5 vouches seed endpoints to rank=1
+        self.seed_vouch_count = 0
         self.address_to_idx: Dict[str, int] = {}
         self.idx_to_address: Dict[int, str] = {}
         self._next_idx = 0
 
-        """
-        reference: https://networkx.org/documentation/stable/reference/generated/networkx.generators.random_graphs.erdos_renyi_graph.html
-        Note: the expected network is generated from a random digraph like
-        `nx.erdos_renyi_graph(n_nodes, p, directed=True)` where
-        - n_nodes is the number of nodes in the network
-        - p is the probability of an edge between two nodes
-        - directed=True means the graph is directed
-        """
         if network is None:
             raise ValueError("Network is required.")
         
         self.network = network
         
-        # Get all nodes from network
+        # --- 1. Address Generation and Initial Node Setup (UNCHANGED) ---
         network_nodes = list(network.nodes())
-        
-        # If network is empty, nothing to do
         if not network_nodes:
             return
         
-        # Generate addresses and map network nodes to addresses
         num_nodes = len(network_nodes)
         addresses = generate_mul_eth_addresses(num_nodes)
+        # Sort network nodes (integers) to match them sequentially to addresses
         node_to_address = dict(zip(sorted(network_nodes), addresses))
         
-        # Set up index mappings to preserve network node indices
         for node_idx, address in node_to_address.items():
             self.address_to_idx[address] = node_idx
             self.idx_to_address[node_idx] = address
-            # Ensure a Node object is created for existing nodes
             if address not in self.nodes:
                 self.nodes[address] = Node()
             self._next_idx = max(self._next_idx, node_idx + 1)
         
-        # Create vouches for each edge - vouch() handles the rest
-        # Make a copy of edges to iterate over as self.vouch modifies the graph
-        edges_to_process = list(network.edges())
-        for from_node, to_node in edges_to_process:
-            from_address = node_to_address.get(from_node)
-            to_address = node_to_address.get(to_node)
-            if from_address and to_address:
-                # Need to manually remove the edge from the graph first
-                # because self.vouch() will add it back.
-                # This ensures correct state initialization.
-                if self.network.has_edge(from_node, to_node):
-                    self.network.remove_edge(from_node, to_node)
+        # --- 2. Structured Vouch Replay (MODIFIED LOGIC) ---
+        
+        # Get sorted list of indices (0, 1, 2, ...)
+        sorted_indices = sorted(self.idx_to_address.keys())
+        
+        for from_idx in sorted_indices:
+            from_address = self.idx_to_address[from_idx]
+            
+            # Get the list of targets (successors) and sort them by index
+            targets_idx = list(network.successors(from_idx))
+            targets_idx.sort() # Ensure targets are processed in ascending index order
+            
+            for to_idx in targets_idx:
+                to_address = self.idx_to_address[to_idx]
+                
+                # Manual Edge Removal (necessary because vouch() adds it back)
+                # We use the original network object (which contains int indices)
+                if self.network.has_edge(from_idx, to_idx):
+                    self.network.remove_edge(from_idx, to_idx)
+                    
                 try:
+                    # Execute vouch, which recalculates rank/score based on the new order
                     self.vouch(from_address, to_address)
                 except ValueError as e:
                     # e.g., "exists" error if logic is not perfect, just log
-                    print(f"Warning during init: {e}")
-        
+                    print(f"Warning during sorted init: {e}")
     
     def _get_or_create_idx(self, address: str) -> int:
         """Get or create index for an address."""
@@ -238,8 +302,8 @@ class VouchMinimal:
         if not self.network.has_edge(from_idx, to_idx):
             self.network.add_edge(from_idx, to_idx)
         
-        # Bootstrap logic: first 5 vouches (0-4) seed endpoints to rank=1
-        if self.seed_vouch_count < 5:
+        # Bootstrap logic: first SEEDVOUCHCOUNT vouches (0-(SEEDVOUCHCOUNT-1)) seed endpoints to rank=1
+        if self.seed_vouch_count < SEEDVOUCHCOUNT:
             # Only save previous ranks if they were actually computed (non-zero)
             if from_node.rank != 0:
                 from_node.previous_rank = from_node.rank
