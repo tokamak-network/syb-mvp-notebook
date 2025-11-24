@@ -375,11 +375,10 @@ def plot_status(vm: VouchMinimal, users: dict, title: str, filename: str):
 # ------------------ MAIN DIFFUSION SCRIPT ------------------
 
 # --- Configuration ---
-N_NODES = 20
+N_NODES = 30
 M_EDGES = 5
 CLUSTER_SIZE = 5 # Nodes 0 through 4 (Alice, Bob, Charlie, David, Eve)
 ATTACK_TARGET_INDEX = 0 # Alice
-ATTACKERS_INDICES = [5, 6, 7] # Frank, Grace, Henry are the attackers
 
 def run_diffusion_problem():
     
@@ -403,64 +402,16 @@ def run_diffusion_problem():
     # Cluster (Inner) Addresses: Nodes 0-4 (Alice to Eve)
     cluster_addrs = [contract.idx_to_address[i] for i in range(CLUSTER_SIZE)]
     
-    # Attackers (Outer) Addresses
-    attacker_addrs = [contract.idx_to_address[i] for i in ATTACKERS_INDICES]
-    attacker_names = [users[a]['name'] for a in attacker_addrs]
-
     print(f"--- Diffusion Problem Setup ---")
     print(f"Target: {target_name} (Index {ATTACK_TARGET_INDEX})")
     print(f"Cluster Size: {CLUSTER_SIZE} users")
-    print(f"Attackers: {', '.join(attacker_names)}")
     print("---------------------------------")
     
-    # --- PHASE 1: INITIAL STATE ---
-    print_status(contract, users, "PHASE 1: Initial State (Base Graph Loaded)")
+    # --- INITIAL STATE ---
+    print_status(contract, users, "Initial State (Base Graph Loaded)")
     plot_status(contract, users, 
-                "Phase 1: Initial State", 
-                "diffusion_phase1_initial.png")
-
-
-    # --- PHASE 2: DIFFUSION WITHIN CLUSTER (STAR ATTACK) ---
-    
-    print("\n--- Starting Phase 2: Diffusion Within Cluster ---")
-    
-    # All members of the cluster vouch for the target (Star Attack pattern)
-    # The target is already in the cluster. We skip the target itself.
-    cluster_vouches = [a for a in cluster_addrs if a != target_addr]
-    
-    for i, vouch_addr in enumerate(cluster_vouches):
-        vouch_name = users[vouch_addr]['name']
-        try:
-            contract.vouch(vouch_addr, target_addr)
-            print(f"Vouch {i+1}: {vouch_name} -> {target_name}")
-        except ValueError as e:
-            print(f"Warning: Vouch failed ({vouch_name} -> {target_name}): {e}")
-
-    # Results after cluster members vouch
-    print_status(contract, users, "PHASE 2: After Cluster Diffusion")
-    plot_status(contract, users, 
-                f"Phase 2: Cluster Diffusion (Target: {target_name})", 
-                "diffusion_phase2_cluster.png")
-
-
-    # --- PHASE 3: DIFFUSION FROM OUTSIDE CLUSTER (ATTACK) ---
-    
-    print("\n--- Starting Phase 3: External Diffusion (Sybil Attack) ---")
-
-    # The attackers outside the cluster now vouch for the target.
-    for i, attacker_addr in enumerate(attacker_addrs):
-        attacker_name = users[attacker_addr]['name']
-        try:
-            contract.vouch(attacker_addr, target_addr)
-            print(f"Attack Vouch {i+1}: {attacker_name} -> {target_name}")
-        except ValueError as e:
-            print(f"Warning: Vouch failed ({attacker_name} -> {target_name}): {e}")
-
-    # Results after external attackers vouch
-    print_status(contract, users, "PHASE 3: After External Diffusion/Attack")
-    plot_status(contract, users, 
-                f"Phase 3: External Attack (Target: {target_name})", 
-                "diffusion_phase3_external.png")
+                "Diffusion replay", 
+                "diffusion_replay.png")
 
 if __name__ == "__main__":
     run_diffusion_problem()
