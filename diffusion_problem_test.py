@@ -20,8 +20,8 @@ def generate_mul_eth_addresses(n):
 # Constants
 DEFAULT_RANK = 6
 R = 5
-BONUS_OUT = 1
-BONUS_CAP = 15
+SCOREBOOST_OUT = 1
+SCOREBOOST_CAP = 15
 SEEDVOUCHCOUNT = 5
 
 @dataclass
@@ -42,8 +42,11 @@ class VouchMinimal:
     
     def __init__(self, network: nx.DiGraph=None):
         """
-        Initializes contract with network using a Diffusion-style Vouch Replay order:
-        Target Node -> Cluster Neighbors -> Outside Cluster.
+        Initializes contract with network using an Iterative Multi-Source Layered BFS Replay.
+        
+        The process starts with Node 0 (Alice). If the graph is disjoint, it automatically
+        restarts the Layered BFS from the lowest-index source node in the remaining
+        unprocessed edges until the entire graph is covered.
         """
         self.nodes: Dict[str, Node] = {}
         self.has_edge: Dict[str, Dict[str, bool]] = {}
@@ -55,10 +58,9 @@ class VouchMinimal:
         if network is None:
             raise ValueError("Network is required.")
         
-        # We must operate on a copy if we modify the edge list order.
         self.network = network.copy() 
         
-        # 1. Address Generation and Initial Node Setup (UNCHANGED)
+        # 1. Address Generation and Initial Node Setup
         network_nodes = list(network.nodes())
         if not network_nodes:
             return
@@ -74,58 +76,107 @@ class VouchMinimal:
                 self.nodes[address] = Node()
             self._next_idx = max(self._next_idx, node_idx + 1)
         
-        # --- 2. Diffusion-Style Vouch Replay (MODIFIED LOGIC) ---
-        
-        # Define the cluster for the diffusion path (Indices 0 through 4)
-        CLUSTER_INDICES = list(range(5))
-        TARGET_NODE_IDX = 0 # Alice
-
-        # Get all edges from the original network (int indices)
+        # --- 2. Full Graph Replay Strategy (Iterative Multi-Source BFS) ---
+        TARGET_NODE_IDX = 0 # Alice, the primary starting point
         all_original_edges = list(network.edges())
-        
-        # --- PHASE A: TARGET NODE (Index 0) VOUCHES ---
-        # Edges starting from the target and going anywhere.
-        target_edges = [e for e in all_original_edges if e[0] == TARGET_NODE_IDX]
+        edges_to_process = set(all_original_edges)
+        ordered_edges_to_replay = []
 
-        # --- PHASE B: INTERNAL CLUSTER SPREAD ---
-        # Edges starting within the cluster (Indices 1-4) AND ending within the cluster (Indices 0-4).
-        internal_cluster_edges = [
-            e for e in all_original_edges 
-            if e[0] in CLUSTER_INDICES and e[0] != TARGET_NODE_IDX # Start within cluster, but not the target
-            and e[1] in CLUSTER_INDICES # End within cluster
-            and e not in target_edges
-        ]
+        initial_total_edges = len(all_original_edges)
+        run_count = 0
         
-        # --- PHASE C: OUTSIDE CLUSTER SPREAD ---
-        # Edges that leave the cluster (start in 0-4 and end outside, OR start outside and end anywhere).
-        outside_cluster_edges = [
-            e for e in all_original_edges 
-            if e not in target_edges and e not in internal_cluster_edges
-        ]
-        
-        # 3. Construct the final ordered list of edges (Index based)
-        ordered_edges_to_replay = (
-            sorted(target_edges) + 
-            sorted(internal_cluster_edges) + 
-            sorted(outside_cluster_edges)
-        )
-        
-        print(f"Diffusion init: Total edges ordered for replay: {len(ordered_edges_to_replay)}")
+        while edges_to_process:
+            run_count += 1
+            
+            # a. Determine the current source/target for BFS
+            if run_count == 1:
+                # First pass: start with Alice (0)
+                current_source_node = TARGET_NODE_IDX
+            else:
+                # Subsequent passes: find the lowest index source node among remaining edges
+                current_source_node = min(e[0] for e in edges_to_process)
+            
+            print(f"Diffusion init (Run {run_count}): Starting Layered BFS from source Index {current_source_node}")
 
-        # 4. Execute the vouches in the new sequence
+            # b. Create a subgraph containing only the remaining edges for BFS calculation
+            subgraph = nx.DiGraph()
+            subgraph.add_edges_from(edges_to_process)
+            subgraph_nodes = set(subgraph.nodes())
+
+            # c. Calculate BFS layers from the current source within the subgraph
+            try:
+                # Shortest path on the *remaining* graph
+                # Note: nx.shortest_path_length is not strictly necessary 
+                # but it is the most direct and efficient way
+                distances = nx.shortest_path_length(subgraph, source=current_source_node)
+            except nx.NetworkXNoPath:
+                # If current_source_node is isolated in the remaining edges, this should not happen 
+                # as it was chosen as an edge source, but we break to prevent infinite loops.
+                break 
+
+            nodes_by_layer = {}
+            max_distance = 0
+            for node, dist in distances.items():
+                if dist != float('inf'):
+                    if dist not in nodes_by_layer:
+                        nodes_by_layer[dist] = []
+                    nodes_by_layer[dist].append(node)
+                    max_distance = max(max_distance, dist)
+
+            processed_in_this_run = set()
+            
+            # d. Apply Layered BFS (Outward + Feedback)
+            for k in range(max_distance + 1):
+                current_sources = nodes_by_layer.get(k, [])
+                
+                # 1. PHASE A (Outward): Edges starting from the current layer sources
+                phase_a_edges = []
+                for u in current_sources:
+                    u_out_edges = [e for e in edges_to_process if e[0] == u]
+                    phase_a_edges.extend(u_out_edges)
+                
+                new_a_edges = sorted(list(set(phase_a_edges))) 
+                ordered_edges_to_replay.extend(new_a_edges)
+                processed_in_this_run.update(new_a_edges)
+
+                # 2. PHASE B (Feedback to current_source_node)
+                next_layer_targets = nodes_by_layer.get(k + 1, [])
+                phase_b_edges = []
+                for v in next_layer_targets:
+                    feedback_edge = (v, current_source_node)
+                    if feedback_edge in edges_to_process:
+                        phase_b_edges.append(feedback_edge)
+                        
+                new_b_edges = sorted(list(set(phase_b_edges)))
+                ordered_edges_to_replay.extend(new_b_edges)
+                processed_in_this_run.update(new_b_edges)
+
+            # e. Update remaining_edges
+            if not processed_in_this_run:
+                # Should not be reached if current_source_node was correctly determined
+                break
+                
+            edges_to_process.difference_update(processed_in_this_run)
+            
+            print(f"Diffusion init (Run {run_count}): Processed {len(processed_in_this_run)} edges. {len(edges_to_process)} remaining.")
+
+
+        print(f"Diffusion init: Total edges ordered for replay: {len(ordered_edges_to_replay)} out of {initial_total_edges}.")
+        
+        # 3. Execute the vouches in the new sequence
         for from_idx, to_idx in ordered_edges_to_replay:
             from_address = self.idx_to_address[from_idx]
             to_address = self.idx_to_address[to_idx]
 
-            # Since we iterate over all edges, remove them first to ensure clean vouch() call.
+            # We must remove the edge from the networkx graph copy before vouching, 
+            # as vouch() will re-add it (essential for correct state counting during replay).
             if self.network.has_edge(from_idx, to_idx):
                 self.network.remove_edge(from_idx, to_idx)
                 
             try:
                 self.vouch(from_address, to_address)
             except ValueError as e:
-                # Should not happen often if graph is pre-filtered, but keep for robustness
-                pass
+                pass # Exceptions like 'exists' are handled by the replay logic.
     
     # --- (vouch, get_score, get_rank, etc. methods are required but omitted for brevity) ---
     def _get_or_create_idx(self, address: str) -> int:
@@ -194,9 +245,9 @@ class VouchMinimal:
             s += self._w(r_u)
         
         outdeg = node.outdegree
-        if outdeg > BONUS_CAP:
-            outdeg = BONUS_CAP
-        s += BONUS_OUT * outdeg
+        if outdeg > SCOREBOOST_CAP:
+            outdeg = SCOREBOOST_CAP
+        s += SCOREBOOST_OUT * outdeg
         
         node.score = s
     
