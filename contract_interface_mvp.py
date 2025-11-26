@@ -161,10 +161,11 @@ class VouchMinimal:
             
             print(f"Diffusion init (Run {run_count}): Starting Layered BFS from source Index {current_source_node}")
 
-            # b. Create a subgraph containing only the remaining edges for BFS calculation
+            # b. Create a subgraph containing ALL nodes and only the remaining edges for BFS calculation
             subgraph = nx.DiGraph()
+            # Ensure ALL nodes from the VouchMinimal instance are added first.
+            subgraph.add_nodes_from(self.idx_to_address.keys())
             subgraph.add_edges_from(edges_to_process)
-            subgraph_nodes = set(subgraph.nodes())
 
             # c. Calculate BFS layers from the current source within the subgraph
             try:
