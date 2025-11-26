@@ -20,7 +20,8 @@ def generate_mul_eth_addresses(n):
 DEFAULT_RANK = 6 #10**24  # rank if no IN neighbors
 R = 5 #64  # weight window: c_r = 2^(R - r) for r<=R
 SCOREBOOST_OUT = 1 # 2**59  # per-edge outdegree bonus
-SCOREBOOST_CAP = 15  # cap for outdegree bonus
+# SCOREBOOST_CAP = 15  # cap for outdegree bonus
+# SCOREBOOST_CAP depends on the rank of each node, so we set it dynamically in the code
 SEEDVOUCHCOUNT = 5  # First N vouches seed endpoints to rank=1
 
 
@@ -321,15 +322,26 @@ class VouchMinimal:
         
         s = 0
         
-        # Sum weights from in-neighbors
+        ## 1. Sum of weights from in-neighbors
         for neighbor in node.in_neighbors:
             r_u = self._rank_or_default(neighbor)
             s += self._w(r_u)
         
-        # Add bonus for outdegree
+        # 2. Add outdegree bonus with rank-dependent cap
         outdeg = node.outdegree
+        
+        # Get the node's current effective rank (default to DEFAULT_RANK if 0)
+        rank = self._rank_or_default(address)
+        
+        # Calculate the rank-dependent bonus cap:
+        # SCOREBOOST_CAP = (rank > R) ? 0 : (2 ** (R - rank)) where R=5.
+        # We use the internal weight function _w() as it calculates this exact value.
+        SCOREBOOST_CAP = self._w(rank)
+        
+        # Apply the cap to the outdegree used for the bonus calculation
         if outdeg > SCOREBOOST_CAP:
             outdeg = SCOREBOOST_CAP
+        
         s += SCOREBOOST_OUT * outdeg
         
         node.score = s
