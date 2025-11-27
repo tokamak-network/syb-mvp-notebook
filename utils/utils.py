@@ -71,9 +71,9 @@ def create_random_mvp_network(num_users: int = 8) -> Tuple[VouchMinimal, Dict[st
 
     network = nx.erdos_renyi_graph(num_users, 0.2, directed=True)
 
-    # Filter out edges involving node zero for a cleaner starting graph
-    edges_to_remove = [edge for edge in network.edges() if 0 in edge]
-    network.remove_edges_from(edges_to_remove)
+    # # Filter out edges involving node zero for a cleaner starting graph
+    # edges_to_remove = [edge for edge in network.edges() if 0 in edge]
+    # network.remove_edges_from(edges_to_remove)
 
     contract = VouchMinimal(network)
 
