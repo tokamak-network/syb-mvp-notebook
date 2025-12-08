@@ -4,17 +4,7 @@ import random
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import networkx as nx
-# Removed: from utils import generate_mul_eth_addresses
-
-# --- Address Generation Functions (Moved from utils.py) ---
-
-def generate_random_eth_address():
-    """Generates a fake random ethereum address."""
-    return f"0x{random.randint(0, 0xffffffffffffffffffffffffffffffffffffffff):040x}"
-
-def generate_mul_eth_addresses(n):
-    """Generates a list of n fake random ethereum addresses."""
-    return [generate_random_eth_address() for _ in range(n)]
+from utils import generate_mul_eth_addresses, generate_alphabetical_names
 
 # --- Constants matching Solidity contract ---
 DEFAULT_RANK = 6 #10**24  # rank if no IN neighbors
@@ -23,7 +13,6 @@ SCOREBOOST_OUT = 1 # 2**59  # per-edge outdegree bonus
 # SCOREBOOST_CAP = 15  # cap for outdegree bonus
 # SCOREBOOST_CAP depends on the rank of each node, so we set it dynamically in the code
 SEEDVOUCHCOUNT = 5  # First N vouches seed endpoints to rank=1
-
 
 @dataclass
 class Node:

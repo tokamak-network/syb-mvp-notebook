@@ -8,8 +8,43 @@ from utils.plot_utils import (
     build_network_figure,
 )
 import matplotlib.pyplot as plt
-from utils.utils import generate_alphabetical_names, create_random_mvp_network
+from utils.utils import generate_alphabetical_names
+import networkx as nx
+from typing import Dict, Tuple
 
+
+def create_random_mvp_network(num_users: int = 8) -> Tuple[VouchMinimal, Dict[str, Dict[str, str]]]:
+    """
+    Create a random MVP network with initial vouches.
+
+    Returns:
+        tuple: (contract, users) where users is a dict mapping addresses to user info
+    """
+    print(f"📊 Creating MVP network with {num_users} users...")
+
+    network = nx.erdos_renyi_graph(num_users, 0.2, directed=True)
+
+    # # Filter out edges involving node zero for a cleaner starting graph
+    # edges_to_remove = [edge for edge in network.edges() if 0 in edge]
+    # network.remove_edges_from(edges_to_remove)
+
+    contract = VouchMinimal(network)
+
+    print(f"✅ Created {contract.network.number_of_edges()} initial vouches")
+
+    users: Dict[str, Dict[str, str]] = {}
+    addresses_by_idx = {idx: addr for idx, addr in contract.idx_to_address.items()}
+    user_names = generate_alphabetical_names(num_users)
+
+    for idx in sorted(addresses_by_idx.keys()):
+        addr = addresses_by_idx[idx]
+        name = user_names[idx] if idx < len(user_names) else f"User {idx}"
+        users[addr] = {
+            "name": name,
+            "address": addr,
+        }
+
+    return contract, users
 
 class SYBMvpUserInterface:
     """Simplified UI for MVP contract - no batch processing, immediate updates."""
