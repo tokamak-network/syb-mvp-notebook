@@ -7,15 +7,7 @@ from typing import List, Dict, Tuple
 import random
 import os
 import itertools # For generating random initial vouches
-
-# --- Definitions from contract_interface_mvp.py ---
-
-# Address Generation Functions (Crucial for VouchMinimal)
-def generate_random_eth_address():
-    return f"0x{random.randint(0, 0xffffffffffffffffffffffffffffffffffffffff):040x}"
-
-def generate_mul_eth_addresses(n):
-    return [generate_random_eth_address() for _ in range(n)]
+from utils import generate_mul_eth_addresses, generate_alphabetical_names, print_status, plot_status
 
 # Constants
 DEFAULT_RANK = 6
@@ -316,112 +308,6 @@ class VouchMinimal:
     def get_score(self, address: str) -> int:
         node = self.nodes.get(address)
         return node.score if node else 0
-
-# --- Helper function from utils.py ---
-
-def generate_alphabetical_names(n: int) -> List[str]:
-    names = [
-        "Alice", "Bob", "Charlie", "David", "Eve", "Frank", "Grace", "Henry",
-        "Ivy", "Jack", "Kate", "Leo", "Mia", "Noah", "Olivia", "Paul",
-        "Quinn", "Rachel", "Sam", "Tina", "Uma", "Victor", "Wendy", "Xavier",
-        "Yara", "Zoe",
-        "Aaron", "Bella", "Clara", "Dylan", "Eliza", "Finn", "Gina", "Hank",
-        "Isabel", "Joel", "Kira", "Liam", "Mona", "Nate", "Opal", "Perry",
-        "Quincy", "Rosa", "Seth", "Tara", "Uri", "Vera", "Will", "Xena",
-        "Yosef", "Zara",
-        "Ava", "Ben", "Cara", "Derek", "Elsa", "Felix", "Gia", "Harvey",
-        "Ingrid", "Jade", "Kyle", "Leah", "Mason", "Nina", "Omar", "Paula",
-        "Queenie", "Rex", "Sara", "Trevor", "Ulric", "Violet", "Wade", "Ximena",
-        "Yvonne", "Zander",
-    ]
-    if n > len(names):
-        extended = []
-        for i in range(n):
-            if i < len(names):
-                extended.append(names[i])
-            else:
-                base_idx = i % len(names)
-                suffix = (i // len(names)) + 1
-                extended.append(f"{names[base_idx]}{suffix}")
-        return extended[:n]
-    return names[:n]
-
-# --- Helper for plotting and printing ---
-
-def print_status(vm: VouchMinimal, users: dict, title: str):
-    """Prints a formatted table of user ranks and scores."""
-    user_data = []
-    
-    # Get alphabetical display names
-    display_names = {addr: data['name'] for addr, data in users.items()}
-
-    # Sort by score descending for readability
-    sorted_addresses = sorted(users.keys(), key=lambda addr: vm.get_score(addr), reverse=True)
-
-    for addr in sorted_addresses:
-        score = vm.get_score(addr)
-        rank = vm.get_rank(addr)
-        user_data.append({
-            'User': display_names[addr],
-            'Rank': 'DEFAULT' if rank >= DEFAULT_RANK else str(rank),
-            'Score': f"{score:,}"
-        })
-
-    df = pd.DataFrame(user_data)
-    
-    print(f"\n--- {title} (Sorted by Score) ---")
-    print(df[['User', 'Rank', 'Score']].to_string(index=False))
-
-def plot_status(vm: VouchMinimal, users: dict, title: str, filename: str):
-    """Generates and saves the graph plot."""
-    graph = vm.network
-    pos = nx.spring_layout(graph, seed=42)
-    
-    # Collect data for plotting
-    node_scores = [vm.get_score(vm.idx_to_address.get(node_idx)) for node_idx in graph.nodes()]
-    node_ranks = [vm.get_rank(vm.idx_to_address.get(node_idx)) for node_idx in graph.nodes()]
-    labels = {node_idx: users[vm.idx_to_address.get(node_idx)]['name'] for node_idx in graph.nodes()}
-
-    # Size calculation
-    scores_array = np.array(node_scores)
-    min_score, max_score = scores_array.min(), scores_array.max()
-    min_size, max_size = 500, 2000
-    
-    if max_score > min_score:
-        normalized_scores = (scores_array - min_score) / (max_score - min_score)
-        node_sizes = min_size + normalized_scores * (max_size - min_size)
-    else:
-        node_sizes = [min_size + (max_size - min_size) / 2] * len(scores_array)
-        
-    # Color calculation
-    colors = []
-    non_default_ranks = [r for r in node_ranks if r < DEFAULT_RANK]
-    cmap = plt.cm.get_cmap('plasma')
-    min_r, max_r = (min(non_default_ranks), max(non_default_ranks)) if non_default_ranks else (0, 0)
-
-    for rank in node_ranks:
-        if rank >= DEFAULT_RANK:
-            colors.append('#cccccc')
-        else:
-            if max_r > min_r:
-                normalized_rank = (rank - min_r) / (max_r - min_r)
-                colors.append(cmap(1.0 - normalized_rank))
-            else:
-                colors.append(cmap(0.5))
-
-    # Plotting
-    plt.figure(figsize=(12, 10))
-    nx.draw_networkx_nodes(graph, pos, node_size=node_sizes, node_color=colors, alpha=0.9)
-    nx.draw_networkx_edges(graph, pos, edge_color='gray', arrowsize=20, width=1.5)
-    nx.draw_networkx_labels(graph, pos, labels=labels, font_size=10, font_color='black')
-
-    plt.title(title, fontsize=16)
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig(filename)
-    plt.close()
-    print(f"Graph saved to {filename}")
-
 
 # ------------------ MAIN DIFFUSION SCRIPT ------------------
 
