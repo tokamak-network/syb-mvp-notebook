@@ -69,11 +69,13 @@ The `syb_mvp.ipynb` notebook guides you through a scripted, then interactive, se
   * **`utils/plot_utils.py`**: Contains the `show_network_status` and `show_network_graph` helper functions, which are used by the notebook to render the status tables and the Plotly network graph.
   * **`requirements.txt`**: A list of all Python dependencies required to run the notebook, including `networkx`, `plotly`, `ipywidgets`, and `nbformat`.
 
-## 🔗 References
+## 🔗 References and Resources
 
-This project is based on the following specifications and resources:
+For more information about the SYB project and its specifications, please refer to the links below:
 
   * **SYB Project Home:** [https://syb.tokamak.network](https://syb.tokamak.network)
   * **SYB Network Explorer:** [https://syb.tokamak.network/explorer](https://syb.tokamak.network/explorer)
-  * **MVP Smart Contract (Sepolia):** [https://sepolia.etherscan.io/address/0x02Cb439549AED1A6c8334430A1D5d320685c3E62\#code](https://sepolia.etherscan.io/address/0x02Cb439549AED1A6c8334430A1D5d320685c3E62#code)
-  * **MVP Scoring Algorithm Specification:** [https://www.notion.so/tokamak/SYB-MVP-Algorithm-specification-29cd96a400a380c289c0e15aa2ad242f?source=copy\_link](https://www.notion.so/tokamak/SYB-MVP-Algorithm-specification-29cd96a400a380c289c0e15aa2ad242f?source=copy_link)
+  * **MVP Smart Contract (Sepolia):** [https://sepolia.etherscan.io/address/0x3124424d2293a735661412A659277Ab7a290a474#code](https://sepolia.etherscan.io/address/0x3124424d2293a735661412A659277Ab7a290a474#code)
+  * **MVP Scoring Algorithm Specification:** [https://syb.tokamak.network/blog/the-algorithm-behind-the-syb-network-mvp-version](https://syb.tokamak.network/blog/the-algorithm-behind-the-syb-network-mvp-version)
+  * **MVP Notebook Guide:** [https://syb.tokamak.network/blog/syb-mvp-notebook](https://syb.tokamak.network/blog/syb-mvp-notebook)
+  * **Telegram Community Chat:** [https://t.me/+HOQmpdZqr4gyZjc8](https://t.me/+HOQmpdZqr4gyZjc8)
